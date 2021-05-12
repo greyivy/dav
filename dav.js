@@ -631,6 +631,8 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { 'd
 
 var _co = require('co');
 
+var _base64util = require('base64util');
+
 var _co2 = _interopRequireDefault(_co);
 
 var _url = require('url');
@@ -2949,9 +2951,10 @@ var Basic = (function (_Transport) {
               xhr = new _xmlhttprequest2['default']();
 
               if (sandbox) sandbox.add(xhr);
-              xhr.open(request.method, url, true, /* async */
-              this.credentials.username, this.credentials.password);
+              xhr.open(request.method, url, true /* async */);
 
+              let auth = "Basic " + _base64util.encode(this.credentials.username + ":" + this.credentials.password);
+              xhr.setRequestHeader("Authorization", auth);
               if (transformRequest) transformRequest(xhr);
 
               result = undefined;
