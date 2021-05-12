@@ -23,6 +23,7 @@
   ],
   "dependencies": {
     "@babel/polyfill": "^7.0.0",
+    "base64util": "^2.1.0",
     "co": "^4.6.0",
     "debug": "^4.1.1",
     "xmldom": "^0.1.27",
