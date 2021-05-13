@@ -1,8 +1,10 @@
 SabreDAV/
 
 /*.zip
+/tmp
 /build/
 /coverage/
 /dav.js.map
 /dav.min.js
 /node_modules/
+/package-lock.json

@@ -9,3 +9,5 @@ SabreDAV/
 /.travis.yml
 /node_modules
 /test
+/package-lock.json
+/tmp
