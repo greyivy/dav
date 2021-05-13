@@ -6820,6 +6820,7 @@
                     );
                     auth = "Basic " + (0, _base64util.encode)(this.credentials.username + ":" + this.credentials.password);
                     xhr.setRequestHeader("Authorization", auth);
+                    xhr.withCredentials = true;
                     if (transformRequest) transformRequest(xhr);
                     _context.prev = 10;
                     _context.next = 13;
