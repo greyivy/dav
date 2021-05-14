@@ -1,6 +1,6 @@
 {
   "name": "dav-fork",
-  "version": "1.8.6",
+  "version": "1.8.7",
   "author": "Gareth Aye [:gaye] <gaye@mozilla.com>",
   "description": "WebDAV, CalDAV, and CardDAV client for nodejs and the browser",
   "license": "MPL-2.0",
@@ -46,7 +46,7 @@
     "tcp-port-used": "^1.0.1"
   },
   "scripts": {
-    "build": "browserify --standalone dav ./lib/index.js -t [ babelify --presets [ @babel/preset-env ] ] --outfile /tmp/dav.js && globcat ./lib/polyfill/*.js ./tmp/dav.js --output ./dav.js",
+    "build": "browserify --standalone dav ./lib/index.js -t [ babelify --presets [ @babel/preset-env ] ] --outfile ./tmp/dav.js && globcat ./lib/polyfill/*.js ./tmp/dav.js --output ./dav.js",
     "test": "make test"
   }
 }

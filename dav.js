@@ -623,6 +623,3067 @@ if (!Object.assign) {
   typeof self === "object" ? self : this
 );
 (function(f){if(typeof exports==="object"&&typeof module!=="undefined"){module.exports=f()}else if(typeof define==="function"&&define.amd){define([],f)}else{var g;if(typeof window!=="undefined"){g=window}else if(typeof global!=="undefined"){g=global}else if(typeof self!=="undefined"){g=self}else{g=this}g.dav = f()}})(function(){var define,module,exports;return (function(){function r(e,n,t){function o(i,f){if(!n[i]){if(!e[i]){var c="function"==typeof require&&require;if(!f&&c)return c(i,!0);if(u)return u(i,!0);var a=new Error("Cannot find module '"+i+"'");throw a.code="MODULE_NOT_FOUND",a}var p=n[i]={exports:{}};e[i][0].call(p.exports,function(r){var n=e[i][1][r];return o(n||r)},p,p.exports,r,e,n,t)}return n[i].exports}for(var u="function"==typeof require&&require,i=0;i<t.length;i++)o(t[i]);return o}return r})()({1:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+var _co = _interopRequireDefault(require("co"));
+
+var _url = _interopRequireDefault(require("url"));
+
+var _calendars = require("./calendars");
+
+var _contacts = require("./contacts");
+
+var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
+
+var _model = require("./model");
+
+var ns = _interopRequireWildcard(require("./namespace"));
+
+var request = _interopRequireWildcard(require("./request"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+var debug = require('debug')('dav:accounts');
+
+var defaults = {
+  accountType: 'caldav',
+  loadCollections: true,
+  loadObjects: false
+};
+/**
+ * rfc 6764.
+ *
+ * @param {dav.Account} account to find root url for.
+ */
+
+var serviceDiscovery = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(account, options) {
+  var endpoint, uri, req, xhr, location;
+  return regeneratorRuntime.wrap(function _callee$(_context) {
+    while (1) {
+      switch (_context.prev = _context.next) {
+        case 0:
+          debug('Attempt service discovery.');
+          endpoint = _url["default"].parse(account.server);
+          endpoint.protocol = endpoint.protocol || 'http'; // TODO(gareth) https?
+
+          uri = _url["default"].format({
+            protocol: endpoint.protocol,
+            host: endpoint.host,
+            pathname: "/.well-known/".concat(options.accountType)
+          });
+          req = request.basic({
+            method: 'GET'
+          });
+          _context.prev = 5;
+          _context.next = 8;
+          return options.xhr.send(req, uri, {
+            sandbox: options.sandbox
+          });
+
+        case 8:
+          xhr = _context.sent;
+
+          if (!(xhr.status >= 300 && xhr.status < 400)) {
+            _context.next = 14;
+            break;
+          }
+
+          // http redirect.
+          location = xhr.getResponseHeader('Location');
+
+          if (!(typeof location === 'string' && location.length)) {
+            _context.next = 14;
+            break;
+          }
+
+          debug("Discovery redirected to ".concat(location));
+          return _context.abrupt("return", _url["default"].format({
+            protocol: endpoint.protocol,
+            host: endpoint.host,
+            pathname: location
+          }));
+
+        case 14:
+          _context.next = 19;
+          break;
+
+        case 16:
+          _context.prev = 16;
+          _context.t0 = _context["catch"](5);
+          debug('Discovery failed... failover to the provided url');
+
+        case 19:
+          return _context.abrupt("return", endpoint.href);
+
+        case 20:
+        case "end":
+          return _context.stop();
+      }
+    }
+  }, _callee, null, [[5, 16]]);
+}));
+/**
+ * rfc 5397.
+ *
+ * @param {dav.Account} account to get principal url for.
+ */
+
+
+var principalUrl = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
+  var req, res, container;
+  return regeneratorRuntime.wrap(function _callee2$(_context2) {
+    while (1) {
+      switch (_context2.prev = _context2.next) {
+        case 0:
+          debug("Fetch principal url from context path ".concat(account.rootUrl, "."));
+          req = request.propfind({
+            props: [{
+              name: 'current-user-principal',
+              namespace: ns.DAV
+            }],
+            depth: 0,
+            mergeResponses: true
+          });
+          _context2.next = 4;
+          return options.xhr.send(req, account.rootUrl, {
+            sandbox: options.sandbox
+          });
+
+        case 4:
+          res = _context2.sent;
+          container = res.props;
+          debug("Received principal: ".concat(container.currentUserPrincipal));
+          return _context2.abrupt("return", _url["default"].resolve(account.rootUrl, container.currentUserPrincipal));
+
+        case 8:
+        case "end":
+          return _context2.stop();
+      }
+    }
+  }, _callee2);
+}));
+/**
+ * @param {dav.Account} account to get home url for.
+ */
+
+
+var homeUrl = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(account, options) {
+  var prop, req, responses, response, container, href;
+  return regeneratorRuntime.wrap(function _callee3$(_context3) {
+    while (1) {
+      switch (_context3.prev = _context3.next) {
+        case 0:
+          debug("Fetch home url from principal url ".concat(account.principalUrl, "."));
+
+          if (options.accountType === 'caldav') {
+            prop = {
+              name: 'calendar-home-set',
+              namespace: ns.CALDAV
+            };
+          } else if (options.accountType === 'carddav') {
+            prop = {
+              name: 'addressbook-home-set',
+              namespace: ns.CARDDAV
+            };
+          }
+
+          req = request.propfind({
+            props: [prop],
+            depth: 0
+          });
+          _context3.next = 5;
+          return options.xhr.send(req, account.principalUrl, {
+            sandbox: options.sandbox
+          });
+
+        case 5:
+          responses = _context3.sent;
+          response = responses.find(function (response) {
+            return (0, _fuzzy_url_equals["default"])(account.principalUrl, response.href);
+          });
+          container = response.props;
+
+          if (options.accountType === 'caldav') {
+            debug("Received home: ".concat(container.calendarHomeSet));
+            href = container.calendarHomeSet;
+          } else if (options.accountType === 'carddav') {
+            debug("Received home: ".concat(container.addressbookHomeSet));
+            href = container.addressbookHomeSet;
+          }
+
+          return _context3.abrupt("return", _url["default"].resolve(account.rootUrl, href));
+
+        case 10:
+        case "end":
+          return _context3.stop();
+      }
+    }
+  }, _callee3);
+}));
+/**
+ * Options:
+ *
+ *   (String) accountType - one of 'caldav' or 'carddav'. Defaults to 'caldav'.
+ *   (Array.<Object>) filters - list of caldav filters to send with request.
+ *   (Boolean) loadCollections - whether or not to load dav collections.
+ *   (Boolean) loadObjects - whether or not to load dav objects.
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (String) server - some url for server (needn't be base url).
+ *   (String) timezone - VTIMEZONE calendar object.
+ *   (dav.Transport) xhr - request sender.
+ *
+ * @return {Promise} a promise that will resolve with a dav.Account object.
+ */
+
+
+exports.createAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(options) {
+  var account, key, loadCollections, loadObjects, collections;
+  return regeneratorRuntime.wrap(function _callee5$(_context5) {
+    while (1) {
+      switch (_context5.prev = _context5.next) {
+        case 0:
+          options = Object.assign({}, defaults, options);
+
+          if (typeof options.loadObjects !== 'boolean') {
+            options.loadObjects = options.loadCollections;
+          }
+
+          account = new _model.Account({
+            server: options.server,
+            credentials: options.xhr.credentials
+          });
+          _context5.next = 5;
+          return serviceDiscovery(account, options);
+
+        case 5:
+          account.rootUrl = _context5.sent;
+          _context5.next = 8;
+          return principalUrl(account, options);
+
+        case 8:
+          account.principalUrl = _context5.sent;
+          _context5.next = 11;
+          return homeUrl(account, options);
+
+        case 11:
+          account.homeUrl = _context5.sent;
+
+          if (options.loadCollections) {
+            _context5.next = 14;
+            break;
+          }
+
+          return _context5.abrupt("return", account);
+
+        case 14:
+          if (options.accountType === 'caldav') {
+            key = 'calendars';
+            loadCollections = _calendars.listCalendars;
+            loadObjects = _calendars.listCalendarObjects;
+          } else if (options.accountType === 'carddav') {
+            key = 'addressBooks';
+            loadCollections = _contacts.listAddressBooks;
+            loadObjects = _contacts.listVCards;
+          }
+
+          _context5.next = 17;
+          return loadCollections(account, options);
+
+        case 17:
+          collections = _context5.sent;
+          account[key] = collections;
+
+          if (options.loadObjects) {
+            _context5.next = 21;
+            break;
+          }
+
+          return _context5.abrupt("return", account);
+
+        case 21:
+          _context5.next = 23;
+          return collections.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(collection) {
+            return regeneratorRuntime.wrap(function _callee4$(_context4) {
+              while (1) {
+                switch (_context4.prev = _context4.next) {
+                  case 0:
+                    _context4.prev = 0;
+                    _context4.next = 3;
+                    return loadObjects(collection, options);
+
+                  case 3:
+                    collection.objects = _context4.sent;
+                    _context4.next = 9;
+                    break;
+
+                  case 6:
+                    _context4.prev = 6;
+                    _context4.t0 = _context4["catch"](0);
+                    collection.error = _context4.t0;
+
+                  case 9:
+                  case "end":
+                    return _context4.stop();
+                }
+              }
+            }, _callee4, null, [[0, 6]]);
+          })));
+
+        case 23:
+          account[key] = account[key].filter(function (collection) {
+            return !collection.error;
+          });
+          return _context5.abrupt("return", account);
+
+        case 25:
+        case "end":
+          return _context5.stop();
+      }
+    }
+  }, _callee5);
+}));
+
+},{"./calendars":2,"./contacts":5,"./fuzzy_url_equals":6,"./model":8,"./namespace":9,"./request":11,"co":26,"debug":27,"url":36}],2:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.createCalendarObject = createCalendarObject;
+exports.updateCalendarObject = updateCalendarObject;
+exports.deleteCalendarObject = deleteCalendarObject;
+exports.syncCalendar = syncCalendar;
+exports.syncCaldavAccount = exports.listCalendarObjects = exports.listCalendars = void 0;
+
+var _co = _interopRequireDefault(require("co"));
+
+var _url = _interopRequireDefault(require("url"));
+
+var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
+
+var _model = require("./model");
+
+var ns = _interopRequireWildcard(require("./namespace"));
+
+var request = _interopRequireWildcard(require("./request"));
+
+var webdav = _interopRequireWildcard(require("./webdav"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+var debug = require('debug')('dav:calendars');
+
+var ICAL_OBJS = new Set(['VEVENT', 'VTODO', 'VJOURNAL', 'VFREEBUSY', 'VTIMEZONE', 'VALARM']);
+/**
+ * @param {dav.Account} account to fetch calendars for.
+ */
+
+var listCalendars = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
+  var req, responses, cals;
+  return regeneratorRuntime.wrap(function _callee2$(_context2) {
+    while (1) {
+      switch (_context2.prev = _context2.next) {
+        case 0:
+          debug("Fetch calendars from home url ".concat(account.homeUrl));
+          req = request.propfind({
+            props: [{
+              name: 'calendar-description',
+              namespace: ns.CALDAV
+            }, {
+              name: 'calendar-timezone',
+              namespace: ns.CALDAV
+            }, {
+              name: 'displayname',
+              namespace: ns.DAV
+            }, {
+              name: 'getctag',
+              namespace: ns.CALENDAR_SERVER
+            }, {
+              name: 'resourcetype',
+              namespace: ns.DAV
+            }, {
+              name: 'supported-calendar-component-set',
+              namespace: ns.CALDAV
+            }, {
+              name: 'sync-token',
+              namespace: ns.DAV
+            }],
+            depth: 1
+          });
+          _context2.next = 4;
+          return options.xhr.send(req, account.homeUrl, {
+            sandbox: options.sandbox
+          });
+
+        case 4:
+          responses = _context2.sent;
+          debug("Found ".concat(responses.length, " calendars."));
+          cals = responses.filter(function (res) {
+            return res.props.resourcetype.includes('calendar');
+          }).filter(function (res) {
+            // We only want the calendar if it contains iCalendar objects.
+            var components = res.props.supportedCalendarComponentSet || [];
+            return components.reduce(function (hasObjs, component) {
+              return hasObjs || ICAL_OBJS.has(component);
+            }, false);
+          }).map(function (res) {
+            debug("Found calendar ".concat(res.props.displayname, ",\n             props: ").concat(JSON.stringify(res.props)));
+            return new _model.Calendar({
+              data: res,
+              account: account,
+              description: res.props.calendarDescription,
+              timezone: res.props.calendarTimezone,
+              url: _url["default"].resolve(account.rootUrl, res.href),
+              ctag: res.props.getctag,
+              displayName: res.props.displayname,
+              components: res.props.supportedCalendarComponentSet,
+              resourcetype: res.props.resourcetype,
+              syncToken: res.props.syncToken
+            });
+          });
+          _context2.next = 9;
+          return cals.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(cal) {
+            return regeneratorRuntime.wrap(function _callee$(_context) {
+              while (1) {
+                switch (_context.prev = _context.next) {
+                  case 0:
+                    _context.next = 2;
+                    return webdav.supportedReportSet(cal, options);
+
+                  case 2:
+                    cal.reports = _context.sent;
+
+                  case 3:
+                  case "end":
+                    return _context.stop();
+                }
+              }
+            }, _callee);
+          })));
+
+        case 9:
+          return _context2.abrupt("return", cals);
+
+        case 10:
+        case "end":
+          return _context2.stop();
+      }
+    }
+  }, _callee2);
+}));
+/**
+ * @param {dav.Calendar} calendar the calendar to put the object on.
+ * @return {Promise} promise will resolve when the calendar has been created.
+ *
+ * Options:
+ *
+ *   (String) data - rfc 5545 VCALENDAR object.
+ *   (String) filename - name for the calendar ics file.
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+exports.listCalendars = listCalendars;
+
+function createCalendarObject(calendar, options) {
+  var objectUrl = _url["default"].resolve(calendar.url, options.filename);
+
+  options.contentType = options.contentType || "text/calendar; charset=utf-8";
+  return webdav.createObject(objectUrl, options.data, options);
+}
+
+;
+/**
+ * @param {dav.CalendarObject} calendarObject updated calendar object.
+ * @return {Promise} promise will resolve when the calendar has been updated.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+function updateCalendarObject(calendarObject, options) {
+  options.contentType = options.contentType || "text/calendar; charset=utf-8";
+  return webdav.updateObject(calendarObject.url, calendarObject.calendarData, calendarObject.etag, options);
+}
+/**
+ * @param {dav.CalendarObject} calendarObject target calendar object.
+ * @return {Promise} promise will resolve when the calendar has been deleted.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+function deleteCalendarObject(calendarObject, options) {
+  return webdav.deleteObject(calendarObject.url, calendarObject.etag, options);
+}
+/**
+ * @param {dav.Calendar} calendar the calendar to fetch objects for.
+ *
+ * Options:
+ *
+ *   (Array.<Object>) filters - optional caldav filters.
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+var listCalendarObjects = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(calendar, options) {
+  var filters, req, responses;
+  return regeneratorRuntime.wrap(function _callee3$(_context3) {
+    while (1) {
+      switch (_context3.prev = _context3.next) {
+        case 0:
+          debug("Doing REPORT on calendar ".concat(calendar.url, " which belongs to\n         ").concat(calendar.account.credentials.username));
+          filters = options.filters || [{
+            type: 'comp-filter',
+            attrs: {
+              name: 'VCALENDAR'
+            },
+            children: [{
+              type: 'comp-filter',
+              attrs: {
+                name: 'VEVENT'
+              }
+            }]
+          }];
+          req = request.calendarQuery({
+            depth: 1,
+            props: [{
+              name: 'getetag',
+              namespace: ns.DAV
+            }, {
+              name: 'calendar-data',
+              namespace: ns.CALDAV
+            }],
+            filters: filters
+          });
+          _context3.next = 5;
+          return options.xhr.send(req, calendar.url, {
+            sandbox: options.sandbox
+          });
+
+        case 5:
+          responses = _context3.sent;
+          return _context3.abrupt("return", responses.map(function (res) {
+            debug("Found calendar object with url ".concat(res.href));
+            return new _model.CalendarObject({
+              data: res,
+              calendar: calendar,
+              url: _url["default"].resolve(calendar.account.rootUrl, res.href),
+              etag: res.props.getetag,
+              calendarData: res.props.calendarData
+            });
+          }));
+
+        case 7:
+        case "end":
+          return _context3.stop();
+      }
+    }
+  }, _callee3);
+}));
+/**
+ * @param {dav.Calendar} calendar the calendar to fetch updates to.
+ * @return {Promise} promise will resolve with updated calendar object.
+ *
+ * Options:
+ *
+ *   (Array.<Object>) filters - list of caldav filters to send with request.
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (String) syncMethod - either 'basic' or 'webdav'. If unspecified, will
+ *       try to do webdav sync and failover to basic sync if rfc 6578 is not
+ *       supported by the server.
+ *   (String) timezone - VTIMEZONE calendar object.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+exports.listCalendarObjects = listCalendarObjects;
+
+function syncCalendar(calendar, options) {
+  options.basicSync = basicSync;
+  options.webdavSync = webdavSync;
+  return webdav.syncCollection(calendar, options);
+}
+/**
+ * @param {dav.Account} account the account to fetch updates for.
+ * @return {Promise} promise will resolve with updated account.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+var syncCaldavAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(account) {
+  var options,
+      cals,
+      _args5 = arguments;
+  return regeneratorRuntime.wrap(function _callee5$(_context5) {
+    while (1) {
+      switch (_context5.prev = _context5.next) {
+        case 0:
+          options = _args5.length > 1 && _args5[1] !== undefined ? _args5[1] : {};
+          options.loadObjects = false;
+          if (!account.calendars) account.calendars = [];
+          _context5.next = 5;
+          return listCalendars(account, options);
+
+        case 5:
+          cals = _context5.sent;
+          cals.filter(function (cal) {
+            // Filter the calendars not previously seen.
+            return account.calendars.every(function (prev) {
+              return !(0, _fuzzy_url_equals["default"])(prev.url, cal.url);
+            });
+          }).forEach(function (cal) {
+            // Add them to the account's calendar list.
+            account.calendars.push(cal);
+          });
+          options.loadObjects = true;
+          _context5.next = 10;
+          return account.calendars.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(cal, index) {
+            return regeneratorRuntime.wrap(function _callee4$(_context4) {
+              while (1) {
+                switch (_context4.prev = _context4.next) {
+                  case 0:
+                    _context4.prev = 0;
+                    _context4.next = 3;
+                    return syncCalendar(cal, options);
+
+                  case 3:
+                    _context4.next = 9;
+                    break;
+
+                  case 5:
+                    _context4.prev = 5;
+                    _context4.t0 = _context4["catch"](0);
+                    debug("Sync calendar ".concat(cal.displayName, " failed with ").concat(_context4.t0));
+                    account.calendars.splice(index, 1);
+
+                  case 9:
+                  case "end":
+                    return _context4.stop();
+                }
+              }
+            }, _callee4, null, [[0, 5]]);
+          })));
+
+        case 10:
+          return _context5.abrupt("return", account);
+
+        case 11:
+        case "end":
+          return _context5.stop();
+      }
+    }
+  }, _callee5);
+}));
+
+exports.syncCaldavAccount = syncCaldavAccount;
+
+var basicSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee6(calendar, options) {
+  var sync;
+  return regeneratorRuntime.wrap(function _callee6$(_context6) {
+    while (1) {
+      switch (_context6.prev = _context6.next) {
+        case 0:
+          _context6.next = 2;
+          return webdav.isCollectionDirty(calendar, options);
+
+        case 2:
+          sync = _context6.sent;
+
+          if (sync) {
+            _context6.next = 6;
+            break;
+          }
+
+          debug('Local ctag matched remote! No need to sync :).');
+          return _context6.abrupt("return", calendar);
+
+        case 6:
+          debug('ctag changed so we need to fetch stuffs.');
+          _context6.next = 9;
+          return listCalendarObjects(calendar, options);
+
+        case 9:
+          calendar.objects = _context6.sent;
+          return _context6.abrupt("return", calendar);
+
+        case 11:
+        case "end":
+          return _context6.stop();
+      }
+    }
+  }, _callee6);
+}));
+
+var webdavSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee7(calendar, options) {
+  var req, result;
+  return regeneratorRuntime.wrap(function _callee7$(_context7) {
+    while (1) {
+      switch (_context7.prev = _context7.next) {
+        case 0:
+          req = request.syncCollection({
+            props: [{
+              name: 'getetag',
+              namespace: ns.DAV
+            }, {
+              name: 'calendar-data',
+              namespace: ns.CALDAV
+            }],
+            syncLevel: 1,
+            syncToken: calendar.syncToken
+          });
+          _context7.next = 3;
+          return options.xhr.send(req, calendar.url, {
+            sandbox: options.sandbox
+          });
+
+        case 3:
+          result = _context7.sent;
+          // TODO(gareth): Handle creations and deletions.
+          result.responses.forEach(function (response) {
+            // Find the calendar object that this response corresponds with.
+            var calendarObject = calendar.objects.filter(function (object) {
+              return (0, _fuzzy_url_equals["default"])(object.url, response.href);
+            })[0];
+
+            if (!calendarObject) {
+              return;
+            }
+
+            calendarObject.etag = response.props.getetag;
+            calendarObject.calendarData = response.props.calendarData;
+          });
+          calendar.syncToken = result.syncToken;
+          return _context7.abrupt("return", calendar);
+
+        case 7:
+        case "end":
+          return _context7.stop();
+      }
+    }
+  }, _callee7);
+}));
+
+},{"./fuzzy_url_equals":6,"./model":8,"./namespace":9,"./request":11,"./webdav":21,"co":26,"debug":27,"url":36}],3:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = camelize;
+
+/**
+ * @fileoverview Camelcase something.
+ */
+function camelize(str) {
+  var delimiter = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : '_';
+  var words = str.split(delimiter);
+  return [words[0]].concat(words.slice(1).map(function (word) {
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  })).join('');
+}
+
+},{}],4:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.Client = void 0;
+
+var _url = _interopRequireDefault(require("url"));
+
+var accounts = _interopRequireWildcard(require("./accounts"));
+
+var calendars = _interopRequireWildcard(require("./calendars"));
+
+var contacts = _interopRequireWildcard(require("./contacts"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
+
+function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
+/**
+ * @param {dav.Transport} xhr - request sender.
+ *
+ * Options:
+ *
+ *   (String) baseUrl - root url to resolve relative request urls with.
+ */
+var Client = /*#__PURE__*/function () {
+  function Client(xhr) {
+    var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+    _classCallCheck(this, Client);
+
+    this.xhr = xhr;
+    Object.assign(this, options); // Expose internal modules for unit testing
+
+    this._accounts = accounts;
+    this._calendars = calendars;
+    this._contacts = contacts;
+  }
+  /**
+   * @param {dav.Request} req - dav request.
+   * @param {String} uri - where to send request.
+   * @return {Promise} a promise that will be resolved with an xhr request
+   *     after its readyState is 4 or the result of applying an optional
+   *     request `transformResponse` function to the xhr object after its
+   *     readyState is 4.
+   *
+   * Options:
+   *
+   *   (Object) sandbox - optional request sandbox.
+   */
+
+
+  _createClass(Client, [{
+    key: "send",
+    value: function send(req, uri, options) {
+      if (this.baseUrl) {
+        var urlObj = _url["default"].parse(uri);
+
+        uri = _url["default"].resolve(this.baseUrl, urlObj.path);
+      }
+
+      return this.xhr.send(req, uri, options);
+    }
+  }, {
+    key: "createAccount",
+    value: function createAccount() {
+      var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+      options.xhr = options.xhr || this.xhr;
+      return accounts.createAccount(options);
+    }
+  }, {
+    key: "createCalendarObject",
+    value: function createCalendarObject(calendar) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.createCalendarObject(calendar, options);
+    }
+  }, {
+    key: "listCalendarObjects",
+    value: function listCalendarObjects(calendar) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.listCalendarObjects(calendar, options);
+    }
+  }, {
+    key: "updateCalendarObject",
+    value: function updateCalendarObject(calendarObject) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.updateCalendarObject(calendarObject, options);
+    }
+  }, {
+    key: "deleteCalendarObject",
+    value: function deleteCalendarObject(calendarObject) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.deleteCalendarObject(calendarObject, options);
+    }
+  }, {
+    key: "syncCalendar",
+    value: function syncCalendar(calendar) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.syncCalendar(calendar, options);
+    }
+  }, {
+    key: "syncCaldavAccount",
+    value: function syncCaldavAccount(account) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return calendars.syncCaldavAccount(account, options);
+    }
+  }, {
+    key: "createCard",
+    value: function createCard(addressBook) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return contacts.createCard(addressBook, options);
+    }
+  }, {
+    key: "updateCard",
+    value: function updateCard(card) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return contacts.updateCard(card, options);
+    }
+  }, {
+    key: "deleteCard",
+    value: function deleteCard(card) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return contacts.deleteCard(card, options);
+    }
+  }, {
+    key: "syncAddressBook",
+    value: function syncAddressBook(addressBook) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return contacts.syncAddressBook(addressBook, options);
+    }
+  }, {
+    key: "syncCarddavAccount",
+    value: function syncCarddavAccount(account) {
+      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+      options.xhr = options.xhr || this.xhr;
+      return contacts.syncCarddavAccount(account, options);
+    }
+  }]);
+
+  return Client;
+}();
+
+exports.Client = Client;
+
+},{"./accounts":1,"./calendars":2,"./contacts":5,"url":36}],5:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.createCard = createCard;
+exports.updateCard = updateCard;
+exports.deleteCard = deleteCard;
+exports.syncAddressBook = syncAddressBook;
+exports.syncCarddavAccount = exports.listVCards = exports.listAddressBooks = void 0;
+
+var _co = _interopRequireDefault(require("co"));
+
+var _url = _interopRequireDefault(require("url"));
+
+var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
+
+var _model = require("./model");
+
+var ns = _interopRequireWildcard(require("./namespace"));
+
+var request = _interopRequireWildcard(require("./request"));
+
+var webdav = _interopRequireWildcard(require("./webdav"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+var debug = require('debug')('dav:contacts');
+/**
+ * @param {dav.Account} account to fetch address books for.
+ */
+
+
+var listAddressBooks = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
+  var req, responses, addressBooks;
+  return regeneratorRuntime.wrap(function _callee2$(_context2) {
+    while (1) {
+      switch (_context2.prev = _context2.next) {
+        case 0:
+          debug("Fetch address books from home url ".concat(account.homeUrl));
+          req = request.propfind({
+            props: [{
+              name: 'displayname',
+              namespace: ns.DAV
+            }, {
+              name: 'getctag',
+              namespace: ns.CALENDAR_SERVER
+            }, {
+              name: 'resourcetype',
+              namespace: ns.DAV
+            }, {
+              name: 'sync-token',
+              namespace: ns.DAV
+            }],
+            depth: 1
+          });
+          _context2.next = 4;
+          return options.xhr.send(req, account.homeUrl, {
+            sandbox: options.sandbox
+          });
+
+        case 4:
+          responses = _context2.sent;
+          addressBooks = responses.filter(function (res) {
+            return typeof res.props.displayname === 'string';
+          }).map(function (res) {
+            debug("Found address book named ".concat(res.props.displayname, ",\n             props: ").concat(JSON.stringify(res.props)));
+            return new _model.AddressBook({
+              data: res,
+              account: account,
+              url: _url["default"].resolve(account.rootUrl, res.href),
+              ctag: res.props.getctag,
+              displayName: res.props.displayname,
+              resourcetype: res.props.resourcetype,
+              syncToken: res.props.syncToken
+            });
+          });
+          _context2.next = 8;
+          return addressBooks.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(addressBook) {
+            return regeneratorRuntime.wrap(function _callee$(_context) {
+              while (1) {
+                switch (_context.prev = _context.next) {
+                  case 0:
+                    _context.next = 2;
+                    return webdav.supportedReportSet(addressBook, options);
+
+                  case 2:
+                    addressBook.reports = _context.sent;
+
+                  case 3:
+                  case "end":
+                    return _context.stop();
+                }
+              }
+            }, _callee);
+          })));
+
+        case 8:
+          return _context2.abrupt("return", addressBooks);
+
+        case 9:
+        case "end":
+          return _context2.stop();
+      }
+    }
+  }, _callee2);
+}));
+/**
+ * @param {dav.AddressBook} addressBook the address book to put the object on.
+ * @return {Promise} promise will resolve when the card has been created.
+ *
+ * Options:
+ *
+ *   (String) data - vcard object.
+ *   (String) filename - name for the address book vcf file.
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+exports.listAddressBooks = listAddressBooks;
+
+function createCard(addressBook, options) {
+  var objectUrl = _url["default"].resolve(addressBook.url, options.filename);
+
+  return webdav.createObject(objectUrl, options.data, options);
+}
+/**
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ */
+
+
+var listVCards = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(addressBook, options) {
+  var req, responses;
+  return regeneratorRuntime.wrap(function _callee3$(_context3) {
+    while (1) {
+      switch (_context3.prev = _context3.next) {
+        case 0:
+          debug("Doing REPORT on address book ".concat(addressBook.url, " which belongs to\n        ").concat(addressBook.account.credentials.username));
+          req = request.addressBookQuery({
+            depth: 1,
+            props: [{
+              name: 'getetag',
+              namespace: ns.DAV
+            }, {
+              name: 'address-data',
+              namespace: ns.CARDDAV
+            }]
+          });
+          _context3.next = 4;
+          return options.xhr.send(req, addressBook.url, {
+            sandbox: options.sandbox
+          });
+
+        case 4:
+          responses = _context3.sent;
+          return _context3.abrupt("return", responses.map(function (res) {
+            debug("Found vcard with url ".concat(res.href));
+            return new _model.VCard({
+              data: res,
+              addressBook: addressBook,
+              url: _url["default"].resolve(addressBook.account.rootUrl, res.href),
+              etag: res.props.getetag,
+              addressData: res.props.addressData
+            });
+          }));
+
+        case 6:
+        case "end":
+          return _context3.stop();
+      }
+    }
+  }, _callee3);
+}));
+/**
+ * @param {dav.VCard} card updated vcard object.
+ * @return {Promise} promise will resolve when the card has been updated.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+exports.listVCards = listVCards;
+
+function updateCard(card, options) {
+  return webdav.updateObject(card.url, card.addressData, card.etag, options);
+}
+/**
+ * @param {dav.VCard} card target vcard object.
+ * @return {Promise} promise will resolve when the calendar has been deleted.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+function deleteCard(card, options) {
+  return webdav.deleteObject(card.url, card.etag, options);
+}
+/**
+ * @param {dav.Calendar} calendar the calendar to fetch updates to.
+ * @return {Promise} promise will resolve with updated calendar object.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (String) syncMethod - either 'basic' or 'webdav'. If unspecified, will
+ *       try to do webdav sync and failover to basic sync if rfc 6578 is not
+ *       supported by the server.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+function syncAddressBook(addressBook, options) {
+  options.basicSync = basicSync;
+  options.webdavSync = webdavSync;
+  return webdav.syncCollection(addressBook, options);
+}
+/**
+ * @param {dav.Account} account the account to fetch updates for.
+ * @return {Promise} promise will resolve with updated account.
+ *
+ * Options:
+ *
+ *   (dav.Sandbox) sandbox - optional request sandbox.
+ *   (dav.Transport) xhr - request sender.
+ */
+
+
+var syncCarddavAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(account) {
+  var options,
+      addressBooks,
+      _args5 = arguments;
+  return regeneratorRuntime.wrap(function _callee5$(_context5) {
+    while (1) {
+      switch (_context5.prev = _context5.next) {
+        case 0:
+          options = _args5.length > 1 && _args5[1] !== undefined ? _args5[1] : {};
+          options.loadObjects = false;
+
+          if (!account.addressBooks) {
+            account.addressBooks = [];
+          }
+
+          _context5.next = 5;
+          return listAddressBooks(account, options);
+
+        case 5:
+          addressBooks = _context5.sent;
+          addressBooks.filter(function (addressBook) {
+            // Filter the address books not previously seen.
+            return account.addressBooks.every(function (prev) {
+              return !(0, _fuzzy_url_equals["default"])(prev.url, addressBook.url);
+            });
+          }).forEach(function (addressBook) {
+            return account.addressBooks.push(addressBook);
+          });
+          options.loadObjects = true;
+          _context5.next = 10;
+          return account.addressBooks.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(addressBook, index) {
+            return regeneratorRuntime.wrap(function _callee4$(_context4) {
+              while (1) {
+                switch (_context4.prev = _context4.next) {
+                  case 0:
+                    _context4.prev = 0;
+                    _context4.next = 3;
+                    return syncAddressBook(addressBook, options);
+
+                  case 3:
+                    _context4.next = 9;
+                    break;
+
+                  case 5:
+                    _context4.prev = 5;
+                    _context4.t0 = _context4["catch"](0);
+                    debug("Syncing ".concat(addressBook.displayName, " failed with ").concat(_context4.t0));
+                    account.addressBooks.splice(index, 1);
+
+                  case 9:
+                  case "end":
+                    return _context4.stop();
+                }
+              }
+            }, _callee4, null, [[0, 5]]);
+          })));
+
+        case 10:
+          return _context5.abrupt("return", account);
+
+        case 11:
+        case "end":
+          return _context5.stop();
+      }
+    }
+  }, _callee5);
+}));
+
+exports.syncCarddavAccount = syncCarddavAccount;
+
+var basicSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee6(addressBook, options) {
+  var sync;
+  return regeneratorRuntime.wrap(function _callee6$(_context6) {
+    while (1) {
+      switch (_context6.prev = _context6.next) {
+        case 0:
+          sync = webdav.isCollectionDirty(addressBook, options);
+
+          if (sync) {
+            _context6.next = 4;
+            break;
+          }
+
+          debug('Local ctag matched remote! No need to sync :).');
+          return _context6.abrupt("return", addressBook);
+
+        case 4:
+          debug('ctag changed so we need to fetch stuffs.');
+          _context6.next = 7;
+          return listVCards(addressBook, options);
+
+        case 7:
+          addressBook.objects = _context6.sent;
+          return _context6.abrupt("return", addressBook);
+
+        case 9:
+        case "end":
+          return _context6.stop();
+      }
+    }
+  }, _callee6);
+}));
+
+var webdavSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee7(addressBook, options) {
+  var req, result;
+  return regeneratorRuntime.wrap(function _callee7$(_context7) {
+    while (1) {
+      switch (_context7.prev = _context7.next) {
+        case 0:
+          req = request.syncCollection({
+            props: [{
+              name: 'getetag',
+              namespace: ns.DAV
+            }, {
+              name: 'address-data',
+              namespace: ns.CARDDAV
+            }],
+            syncLevel: 1,
+            syncToken: addressBook.syncToken
+          });
+          _context7.next = 3;
+          return options.xhr.send(req, addressBook.url, {
+            sandbox: options.sandbox
+          });
+
+        case 3:
+          result = _context7.sent;
+          // TODO(gareth): Handle creations and deletions.
+          result.responses.forEach(function (response) {
+            // Find the vcard that this response corresponds with.
+            var vcard = addressBook.objects.filter(function (object) {
+              return (0, _fuzzy_url_equals["default"])(object.url, response.href);
+            })[0];
+            if (!vcard) return;
+            vcard.etag = response.props.getetag;
+            vcard.addressData = response.props.addressData;
+          });
+          addressBook.syncToken = result.syncToken;
+          return _context7.abrupt("return", addressBook);
+
+        case 7:
+        case "end":
+          return _context7.stop();
+      }
+    }
+  }, _callee7);
+}));
+
+},{"./fuzzy_url_equals":6,"./model":8,"./namespace":9,"./request":11,"./webdav":21,"co":26,"debug":27,"url":36}],6:[function(require,module,exports){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = fuzzyUrlEquals;
+
+function fuzzyUrlEquals(one, other) {
+  return fuzzyIncludes(one, other) || fuzzyIncludes(other, one);
+}
+
+;
+
+function fuzzyIncludes(one, other) {
+  return one.indexOf(other) !== -1 || other.charAt(other.length - 1) === '/' && one.indexOf(other.slice(0, -1)) !== -1;
+}
+
+},{}],7:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+var _exportNames = {
+  debug: true,
+  ns: true,
+  Request: true,
+  request: true,
+  transport: true,
+  version: true,
+  createAccount: true,
+  Client: true,
+  Sandbox: true,
+  createSandbox: true
+};
+Object.defineProperty(exports, "Request", {
+  enumerable: true,
+  get: function get() {
+    return request.Request;
+  }
+});
+Object.defineProperty(exports, "version", {
+  enumerable: true,
+  get: function get() {
+    return _package.version;
+  }
+});
+Object.defineProperty(exports, "createAccount", {
+  enumerable: true,
+  get: function get() {
+    return _accounts.createAccount;
+  }
+});
+Object.defineProperty(exports, "Client", {
+  enumerable: true,
+  get: function get() {
+    return _client.Client;
+  }
+});
+Object.defineProperty(exports, "Sandbox", {
+  enumerable: true,
+  get: function get() {
+    return _sandbox.Sandbox;
+  }
+});
+Object.defineProperty(exports, "createSandbox", {
+  enumerable: true,
+  get: function get() {
+    return _sandbox.createSandbox;
+  }
+});
+exports.transport = exports.request = exports.ns = exports.debug = void 0;
+
+var ns = _interopRequireWildcard(require("./namespace"));
+
+exports.ns = ns;
+
+var request = _interopRequireWildcard(require("./request"));
+
+exports.request = request;
+
+var transport = _interopRequireWildcard(require("./transport"));
+
+exports.transport = transport;
+
+var _package = require("../package");
+
+var _accounts = require("./accounts");
+
+var _calendars = require("./calendars");
+
+Object.keys(_calendars).forEach(function (key) {
+  if (key === "default" || key === "__esModule") return;
+  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
+  if (key in exports && exports[key] === _calendars[key]) return;
+  Object.defineProperty(exports, key, {
+    enumerable: true,
+    get: function get() {
+      return _calendars[key];
+    }
+  });
+});
+
+var _client = require("./client");
+
+var _contacts = require("./contacts");
+
+Object.keys(_contacts).forEach(function (key) {
+  if (key === "default" || key === "__esModule") return;
+  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
+  if (key in exports && exports[key] === _contacts[key]) return;
+  Object.defineProperty(exports, key, {
+    enumerable: true,
+    get: function get() {
+      return _contacts[key];
+    }
+  });
+});
+
+var _model = require("./model");
+
+Object.keys(_model).forEach(function (key) {
+  if (key === "default" || key === "__esModule") return;
+  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
+  if (key in exports && exports[key] === _model[key]) return;
+  Object.defineProperty(exports, key, {
+    enumerable: true,
+    get: function get() {
+      return _model[key];
+    }
+  });
+});
+
+var _sandbox = require("./sandbox");
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+var debug = require('debug')('dav');
+
+exports.debug = debug;
+
+},{"../package":42,"./accounts":1,"./calendars":2,"./client":4,"./contacts":5,"./model":8,"./namespace":9,"./request":11,"./sandbox":12,"./transport":20,"debug":27}],8:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.VCard = exports.CalendarObject = exports.DAVObject = exports.Calendar = exports.AddressBook = exports.DAVCollection = exports.Credentials = exports.Account = void 0;
+
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function"); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, writable: true, configurable: true } }); if (superClass) _setPrototypeOf(subClass, superClass); }
+
+function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) { o.__proto__ = p; return o; }; return _setPrototypeOf(o, p); }
+
+function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = _getPrototypeOf(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
+
+function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) === "object" || typeof call === "function")) { return call; } return _assertThisInitialized(self); }
+
+function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
+
+function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
+
+function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+var Account = function Account(options) {
+  _classCallCheck(this, Account);
+
+  Object.assign(this, {
+    server: null,
+    credentials: null,
+    rootUrl: null,
+    principalUrl: null,
+    homeUrl: null,
+    calendars: null,
+    addressBooks: null
+  }, options);
+};
+/**
+ * Options:
+ *   (String) username - username (perhaps email) for calendar user.
+ *   (String) password - plaintext password for calendar user.
+ *   (String) clientId - oauth client id.
+ *   (String) clientSecret - oauth client secret.
+ *   (String) authorizationCode - oauth code.
+ *   (String) redirectUrl - oauth redirect url.
+ *   (String) tokenUrl - oauth token url.
+ *   (String) accessToken - oauth access token.
+ *   (String) refreshToken - oauth refresh token.
+ *   (Number) expiration - unix time for access token expiration.
+ */
+
+
+exports.Account = Account;
+
+var Credentials = function Credentials(options) {
+  _classCallCheck(this, Credentials);
+
+  Object.assign(this, {
+    username: null,
+    password: null,
+    clientId: null,
+    clientSecret: null,
+    authorizationCode: null,
+    redirectUrl: null,
+    tokenUrl: null,
+    accessToken: null,
+    refreshToken: null,
+    expiration: null
+  }, options);
+};
+
+exports.Credentials = Credentials;
+
+var DAVCollection = function DAVCollection(options) {
+  _classCallCheck(this, DAVCollection);
+
+  Object.assign(this, {
+    data: null,
+    objects: null,
+    account: null,
+    ctag: null,
+    description: null,
+    displayName: null,
+    reports: null,
+    resourcetype: null,
+    syncToken: null,
+    url: null
+  }, options);
+};
+
+exports.DAVCollection = DAVCollection;
+
+var AddressBook = /*#__PURE__*/function (_DAVCollection) {
+  _inherits(AddressBook, _DAVCollection);
+
+  var _super = _createSuper(AddressBook);
+
+  function AddressBook(options) {
+    _classCallCheck(this, AddressBook);
+
+    return _super.call(this, options);
+  }
+
+  return AddressBook;
+}(DAVCollection);
+
+exports.AddressBook = AddressBook;
+
+var Calendar = /*#__PURE__*/function (_DAVCollection2) {
+  _inherits(Calendar, _DAVCollection2);
+
+  var _super2 = _createSuper(Calendar);
+
+  function Calendar(options) {
+    var _this;
+
+    _classCallCheck(this, Calendar);
+
+    _this = _super2.call(this, options);
+    Object.assign(_assertThisInitialized(_this), {
+      components: null,
+      timezone: null
+    }, options);
+    return _this;
+  }
+
+  return Calendar;
+}(DAVCollection);
+
+exports.Calendar = Calendar;
+
+var DAVObject = function DAVObject(options) {
+  _classCallCheck(this, DAVObject);
+
+  Object.assign(this, {
+    data: null,
+    etag: null,
+    url: null
+  }, options);
+};
+
+exports.DAVObject = DAVObject;
+
+var CalendarObject = /*#__PURE__*/function (_DAVObject) {
+  _inherits(CalendarObject, _DAVObject);
+
+  var _super3 = _createSuper(CalendarObject);
+
+  function CalendarObject(options) {
+    var _this2;
+
+    _classCallCheck(this, CalendarObject);
+
+    _this2 = _super3.call(this, options);
+    Object.assign(_assertThisInitialized(_this2), {
+      calendar: null,
+      calendarData: null
+    }, options);
+    return _this2;
+  }
+
+  return CalendarObject;
+}(DAVObject);
+
+exports.CalendarObject = CalendarObject;
+
+var VCard = /*#__PURE__*/function (_DAVObject2) {
+  _inherits(VCard, _DAVObject2);
+
+  var _super4 = _createSuper(VCard);
+
+  function VCard(options) {
+    var _this3;
+
+    _classCallCheck(this, VCard);
+
+    _this3 = _super4.call(this, options);
+    Object.assign(_assertThisInitialized(_this3), {
+      addressBook: null,
+      addressData: null
+    }, options);
+    return _this3;
+  }
+
+  return VCard;
+}(DAVObject);
+
+exports.VCard = VCard;
+
+},{}],9:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.DAV = exports.CARDDAV = exports.CALDAV = exports.CALDAV_APPLE = exports.CALENDAR_SERVER = void 0;
+var CALENDAR_SERVER = 'http://calendarserver.org/ns/';
+exports.CALENDAR_SERVER = CALENDAR_SERVER;
+var CALDAV_APPLE = 'http://apple.com/ns/ical/';
+exports.CALDAV_APPLE = CALDAV_APPLE;
+var CALDAV = 'urn:ietf:params:xml:ns:caldav';
+exports.CALDAV = CALDAV;
+var CARDDAV = 'urn:ietf:params:xml:ns:carddav';
+exports.CARDDAV = CARDDAV;
+var DAV = 'DAV:';
+exports.DAV = DAV;
+
+},{}],10:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.multistatus = multistatus;
+
+var _camelize = _interopRequireDefault(require("./camelize"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+var debug = require('debug')('dav:parser');
+
+var DOMParser;
+
+if (typeof self !== 'undefined' && 'DOMParser' in self) {
+  // browser main thread
+  DOMParser = self.DOMParser;
+} else {
+  // nodejs or web worker
+  DOMParser = require('xmldom').DOMParser;
+}
+
+function multistatus(string) {
+  var parser = new DOMParser();
+  var doc = parser.parseFromString(string, 'text/xml');
+  var result = traverse.multistatus(child(doc, 'multistatus'));
+  debug("input:\n".concat(string, "\noutput:\n").concat(JSON.stringify(result), "\n"));
+  return result;
+}
+
+var traverse = {
+  // { response: [x, y, z] }
+  multistatus: function multistatus(node) {
+    return complex(node, {
+      response: true
+    });
+  },
+  // { propstat: [x, y, z] }
+  response: function response(node) {
+    return complex(node, {
+      propstat: true,
+      href: false
+    });
+  },
+  // { prop: x }
+  propstat: function propstat(node) {
+    return complex(node, {
+      prop: false
+    });
+  },
+  // {
+  //   resourcetype: x
+  //   supportedCalendarComponentSet: y,
+  //   supportedReportSet: z
+  // }
+  prop: function prop(node) {
+    return complex(node, {
+      resourcetype: false,
+      supportedCalendarComponentSet: false,
+      supportedReportSet: false,
+      currentUserPrincipal: false
+    });
+  },
+  resourcetype: function resourcetype(node) {
+    return childNodes(node).map(function (childNode) {
+      return childNode.localName;
+    });
+  },
+  // [x, y, z]
+  supportedCalendarComponentSet: function supportedCalendarComponentSet(node) {
+    return complex(node, {
+      comp: true
+    }, 'comp');
+  },
+  // [x, y, z]
+  supportedReportSet: function supportedReportSet(node) {
+    return complex(node, {
+      supportedReport: true
+    }, 'supportedReport');
+  },
+  comp: function comp(node) {
+    return node.getAttribute('name');
+  },
+  // x
+  supportedReport: function supportedReport(node) {
+    return complex(node, {
+      report: false
+    }, 'report');
+  },
+  report: function report(node) {
+    return childNodes(node).map(function (childNode) {
+      return childNode.localName;
+    });
+  },
+  href: function href(node) {
+    return decodeURIComponent(childNodes(node)[0].nodeValue);
+  },
+  currentUserPrincipal: function currentUserPrincipal(node) {
+    return complex(node, {
+      href: false
+    }, 'href');
+  }
+};
+
+function complex(node, childspec, collapse) {
+  var result = {};
+
+  for (var key in childspec) {
+    if (childspec[key]) {
+      // Create array since we're expecting multiple.
+      result[key] = [];
+    }
+  }
+
+  childNodes(node).forEach(function (childNode) {
+    return traverseChild(node, childNode, childspec, result);
+  });
+  return maybeCollapse(result, childspec, collapse);
+}
+/**
+ * Parse child childNode of node with childspec and write outcome to result.
+ */
+
+
+function traverseChild(node, childNode, childspec, result) {
+  if (childNode.nodeType === 3 && /^\s+$/.test(childNode.nodeValue)) {
+    // Whitespace... nothing to do.
+    return;
+  }
+
+  var localName = (0, _camelize["default"])(childNode.localName, '-');
+
+  if (!(localName in childspec)) {
+    debug('Unexpected node of type ' + localName + ' encountered while ' + 'parsing ' + node.localName + ' node!');
+    var value = childNode.textContent;
+
+    if (localName in result) {
+      if (!Array.isArray(result[localName])) {
+        // Since we've already encountered this node type and we haven't yet
+        // made an array for it, make an array now.
+        result[localName] = [result[localName]];
+      }
+
+      result[localName].push(value);
+      return;
+    } // First time we're encountering this node.
+
+
+    result[localName] = value;
+    return;
+  }
+
+  var traversal = traverse[localName](childNode);
+
+  if (childspec[localName]) {
+    // Expect multiple.
+    result[localName].push(traversal);
+  } else {
+    // Expect single.
+    result[localName] = traversal;
+  }
+}
+
+function maybeCollapse(result, childspec, collapse) {
+  if (!collapse) {
+    return result;
+  }
+
+  if (!childspec[collapse]) {
+    return result[collapse];
+  } // Collapse array.
+
+
+  return result[collapse].reduce(function (a, b) {
+    return a.concat(b);
+  }, []);
+}
+
+function childNodes(node) {
+  var result = node.childNodes;
+
+  if (!Array.isArray(result)) {
+    result = Array.prototype.slice.call(result);
+  }
+
+  return result;
+}
+
+function children(node, localName) {
+  return childNodes(node).filter(function (childNode) {
+    return childNode.localName === localName;
+  });
+}
+
+function child(node, localName) {
+  return children(node, localName)[0];
+}
+
+},{"./camelize":3,"debug":27,"xmldom":38}],11:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.addressBookQuery = addressBookQuery;
+exports.basic = basic;
+exports.calendarQuery = calendarQuery;
+exports.collectionQuery = collectionQuery;
+exports.propfind = propfind;
+exports.syncCollection = syncCollection;
+exports.mergeProps = mergeProps;
+exports.getProps = getProps;
+exports.setRequestHeaders = setRequestHeaders;
+exports.Request = void 0;
+
+var _parser = require("./parser");
+
+var template = _interopRequireWildcard(require("./template/index"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+/**
+ * Options:
+ *
+ *   (String) depth - optional value for Depth header.
+ *   (Array.<Object>) props - list of props to request.
+ */
+function addressBookQuery(options) {
+  return collectionQuery(template.addressBookQuery({
+    props: options.props || []
+  }), {
+    depth: options.depth
+  });
+}
+/**
+ * Options:
+ *
+ *   (String) data - put request body.
+ *   (String) method - http method.
+ *   (String) etag - cached calendar object etag.
+ */
+
+
+function basic(options) {
+  function transformRequest(xhr) {
+    setRequestHeaders(xhr, options);
+  }
+
+  return new Request({
+    method: options.method,
+    requestData: options.data,
+    transformRequest: transformRequest
+  });
+}
+/**
+ * Options:
+ *
+ *   (String) depth - optional value for Depth header.
+ *   (Array.<Object>) filters - list of filters to send with request.
+ *   (Array.<Object>) props - list of props to request.
+ *   (String) timezone - VTIMEZONE calendar object.
+ */
+
+
+function calendarQuery(options) {
+  return collectionQuery(template.calendarQuery({
+    props: options.props || [],
+    filters: options.filters || [],
+    timezone: options.timezone
+  }), {
+    depth: options.depth
+  });
+}
+
+function collectionQuery(requestData, options) {
+  function transformRequest(xhr) {
+    setRequestHeaders(xhr, options);
+  }
+
+  function transformResponse(xhr) {
+    return (0, _parser.multistatus)(xhr.responseText).response.map(function (res) {
+      return {
+        href: res.href,
+        props: getProps(res.propstat)
+      };
+    });
+  }
+
+  return new Request({
+    method: 'REPORT',
+    requestData: requestData,
+    transformRequest: transformRequest,
+    transformResponse: transformResponse
+  });
+}
+/**
+ * Options:
+ *
+ *   (String) depth - optional value for Depth header.
+ *   (Array.<Object>) props - list of props to request.
+ */
+
+
+function propfind(options) {
+  var requestData = template.propfind({
+    props: options.props
+  });
+
+  function transformRequest(xhr) {
+    setRequestHeaders(xhr, options);
+  }
+
+  function transformResponse(xhr) {
+    var responses = (0, _parser.multistatus)(xhr.responseText).response.map(function (res) {
+      return {
+        href: res.href,
+        props: getProps(res.propstat)
+      };
+    });
+
+    if (!options.mergeResponses) {
+      return responses;
+    } // Merge the props.
+
+
+    var merged = mergeProps(responses.map(function (res) {
+      return res.props;
+    }));
+    var hrefs = responses.map(function (res) {
+      return res.href;
+    });
+    return {
+      props: merged,
+      hrefs: hrefs
+    };
+  }
+
+  return new Request({
+    method: 'PROPFIND',
+    requestData: requestData,
+    transformRequest: transformRequest,
+    transformResponse: transformResponse
+  });
+}
+/**
+ * Options:
+ *
+ *   (String) depth - option value for Depth header.
+ *   (Array.<Object>) props - list of props to request.
+ *   (Number) syncLevel - indicates scope of the sync report request.
+ *   (String) syncToken - synchronization token provided by the server.
+ */
+
+
+function syncCollection(options) {
+  var requestData = template.syncCollection({
+    props: options.props,
+    syncLevel: options.syncLevel,
+    syncToken: options.syncToken
+  });
+
+  function transformRequest(xhr) {
+    setRequestHeaders(xhr, options);
+  }
+
+  function transformResponse(xhr) {
+    var object = (0, _parser.multistatus)(xhr.responseText);
+    var responses = object.response.map(function (res) {
+      return {
+        href: res.href,
+        props: getProps(res.propstat)
+      };
+    });
+    return {
+      responses: responses,
+      syncToken: object.syncToken
+    };
+  }
+
+  return new Request({
+    method: 'REPORT',
+    requestData: requestData,
+    transformRequest: transformRequest,
+    transformResponse: transformResponse
+  });
+}
+
+var Request = function Request() {
+  var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
+  _classCallCheck(this, Request);
+
+  Object.assign(this, {
+    method: null,
+    requestData: null,
+    transformRequest: null,
+    transformResponse: null,
+    onerror: null
+  }, options);
+};
+
+exports.Request = Request;
+
+function getProp(propstat) {
+  if (/404/g.test(propstat.status)) {
+    return null;
+  }
+
+  if (/5\d{2}/g.test(propstat.status) || /4\d{2}/g.test(propstat.status)) {
+    throw new Error('Bad status on propstat: ' + propstat.status);
+  }
+
+  return 'prop' in propstat ? propstat.prop : null;
+}
+
+function mergeProps(props) {
+  return props.reduce(function (a, b) {
+    return Object.assign(a, b);
+  }, {});
+}
+/**
+ * Map propstats to props.
+ */
+
+
+function getProps(propstats) {
+  return mergeProps(propstats.map(getProp).filter(function (prop) {
+    return prop && _typeof(prop) === 'object';
+  }));
+}
+
+function setRequestHeaders(request, options) {
+  request.setRequestHeader('Content-Type', options.contentType || 'application/xml;charset=utf-8');
+
+  if (options.depth !== undefined) {
+    request.setRequestHeader('Depth', options.depth);
+  }
+
+  if (options.etag !== undefined) {
+    request.setRequestHeader('If-Match', options.etag);
+  }
+}
+
+},{"./parser":10,"./template/index":16}],12:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.createSandbox = createSandbox;
+exports.Sandbox = void 0;
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
+
+function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
+/**
+ * @fileoverview Group requests together and then abort as a group.
+ *
+ * var sandbox = new dav.Sandbox();
+ * return Promise.all([
+ *   dav.createEvent(event, { sandbox: sandbox }),
+ *   dav.deleteEvent(other, { sandbox: sandbox })
+ * ])
+ * .catch(function() {
+ *   // Something went wrong so abort all requests.
+ *   sandbox.abort;
+ * });
+ */
+var debug = require('debug')('dav:sandbox');
+
+var Sandbox = /*#__PURE__*/function () {
+  function Sandbox() {
+    _classCallCheck(this, Sandbox);
+
+    this.requestList = [];
+  }
+
+  _createClass(Sandbox, [{
+    key: "add",
+    value: function add(request) {
+      debug('Adding request to sandbox.');
+      this.requestList.push(request);
+    }
+  }, {
+    key: "abort",
+    value: function abort() {
+      debug('Aborting sandboxed requests.');
+      this.requestList.forEach(function (request) {
+        return request.abort();
+      });
+    }
+  }]);
+
+  return Sandbox;
+}();
+
+exports.Sandbox = Sandbox;
+
+function createSandbox() {
+  return new Sandbox();
+}
+
+},{"debug":27}],13:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = addressBookQuery;
+
+var _prop = _interopRequireDefault(require("./prop"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function addressBookQuery(object) {
+  return "<card:addressbook-query xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n                          xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n    <!-- According to http://stackoverflow.com/questions/23742568/google-carddav-api-addressbook-multiget-returns-400-bad-request,\n         Google's CardDAV server requires a filter element. I don't think all addressbook-query calls need a filter in the spec though? -->\n    <card:filter>\n      <card:prop-filter name=\"FN\">\n      </card:prop-filter>\n    </card:filter>\n  </card:addressbook-query>");
+}
+
+},{"./prop":17}],14:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = calendarQuery;
+
+var _filter = _interopRequireDefault(require("./filter"));
+
+var _prop = _interopRequireDefault(require("./prop"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function calendarQuery(object) {
+  return "<c:calendar-query xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n                    xmlns:cs=\"http://calendarserver.org/ns/\"\n                    xmlns:ca=\"http://apple.com/ns/ical/\"\n                    xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n    <c:filter>\n      ").concat(object.filters.map(_filter["default"]), "\n    </c:filter>\n    ").concat(object.timezone ? '<c:timezone>' + object.timezone + '</c:timezone>' : '', "\n  </c:calendar-query>");
+}
+
+},{"./filter":15,"./prop":17}],15:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = filter;
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+function filter(item) {
+  if (!item.children || !item.children.length) {
+    if (typeof item.value === 'undefined') {
+      return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), "/>");
+    }
+
+    return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), ">").concat(item.value, "</c:").concat(item.type, ">");
+  }
+
+  var children = item.children.map(filter);
+  return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), ">\n            ").concat(children, "\n          </c:").concat(item.type, ">");
+}
+
+function formatAttrs(attrs) {
+  if (_typeof(attrs) !== 'object') {
+    return '';
+  }
+
+  return Object.keys(attrs).map(function (attr) {
+    return "".concat(attr, "=\"").concat(attrs[attr], "\"");
+  }).join(' ');
+}
+
+},{}],16:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+Object.defineProperty(exports, "addressBookQuery", {
+  enumerable: true,
+  get: function get() {
+    return _address_book_query["default"];
+  }
+});
+Object.defineProperty(exports, "calendarQuery", {
+  enumerable: true,
+  get: function get() {
+    return _calendar_query["default"];
+  }
+});
+Object.defineProperty(exports, "propfind", {
+  enumerable: true,
+  get: function get() {
+    return _propfind["default"];
+  }
+});
+Object.defineProperty(exports, "syncCollection", {
+  enumerable: true,
+  get: function get() {
+    return _sync_collection["default"];
+  }
+});
+
+var _address_book_query = _interopRequireDefault(require("./address_book_query"));
+
+var _calendar_query = _interopRequireDefault(require("./calendar_query"));
+
+var _propfind = _interopRequireDefault(require("./propfind"));
+
+var _sync_collection = _interopRequireDefault(require("./sync_collection"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+},{"./address_book_query":13,"./calendar_query":14,"./propfind":18,"./sync_collection":19}],17:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = prop;
+
+var ns = _interopRequireWildcard(require("../namespace"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+/**
+ * @param {Object} filter looks like
+ *
+ *     {
+ *       type: 'comp-filter',
+ *       attrs: {
+ *         name: 'VCALENDAR'
+ *       }
+ *     }
+ *
+ * Or maybe
+ *
+ *     {
+ *       type: 'time-range',
+ *       attrs: {
+ *         start: '20060104T000000Z',
+ *         end: '20060105T000000Z'
+ *       }
+ *     }
+ *
+ * You can nest them like so:
+ *
+ *     {
+ *       type: 'comp-filter',
+ *       attrs: { name: 'VCALENDAR' },
+ *       children: [{
+ *         type: 'comp-filter',
+ *         attrs: { name: 'VEVENT' },
+ *         children: [{
+ *           type: 'time-range',
+ *           attrs: { start: '20060104T000000Z', end: '20060105T000000Z' }
+ *         }]
+ *       }]
+ *     }
+ */
+function prop(item) {
+  return "<".concat(xmlnsPrefix(item.namespace), ":").concat(item.name, " />");
+}
+
+function xmlnsPrefix(namespace) {
+  switch (namespace) {
+    case ns.DAV:
+      return 'd';
+
+    case ns.CALENDAR_SERVER:
+      return 'cs';
+
+    case ns.CALDAV_APPLE:
+      return 'ca';
+
+    case ns.CALDAV:
+      return 'c';
+
+    case ns.CARDDAV:
+      return 'card';
+
+    default:
+      throw new Error('Unrecognized xmlns ' + namespace);
+  }
+}
+
+},{"../namespace":9}],18:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = propfind;
+
+var _prop = _interopRequireDefault(require("./prop"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function propfind(object) {
+  return "<d:propfind xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n              xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n              xmlns:cs=\"http://calendarserver.org/ns/\"\n              xmlns:ca=\"http://apple.com/ns/ical/\"\n              xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n  </d:propfind>");
+}
+
+},{"./prop":17}],19:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = syncCollection;
+
+var _prop = _interopRequireDefault(require("./prop"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function syncCollection(object) {
+  return "<d:sync-collection xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n                     xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n                     xmlns:d=\"DAV:\">\n    <d:sync-level>".concat(object.syncLevel, "</d:sync-level>\n    <d:sync-token>").concat(object.syncToken, "</d:sync-token>\n    <d:prop>\n      ").concat(object.props.map(_prop["default"]), "\n    </d:prop>\n  </d:sync-collection>");
+}
+
+},{"./prop":17}],20:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.OAuth2 = exports.Basic = exports.Transport = void 0;
+
+var _co = _interopRequireDefault(require("co"));
+
+var _querystring = _interopRequireDefault(require("querystring"));
+
+var _base64util = require("base64util");
+
+var _xmlhttprequest = _interopRequireDefault(require("./xmlhttprequest"));
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function"); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, writable: true, configurable: true } }); if (superClass) _setPrototypeOf(subClass, superClass); }
+
+function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) { o.__proto__ = p; return o; }; return _setPrototypeOf(o, p); }
+
+function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = _getPrototypeOf(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
+
+function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) === "object" || typeof call === "function")) { return call; } return _assertThisInitialized(self); }
+
+function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
+
+function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
+
+function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
+
+function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
+var Transport = /*#__PURE__*/function () {
+  /**
+   * @param {dav.Credentials} credentials user authorization.
+   */
+  function Transport(credentials) {
+    _classCallCheck(this, Transport);
+
+    this.credentials = credentials || null;
+  }
+  /**
+   * @param {dav.Request} request object with request info.
+   * @return {Promise} a promise that will be resolved with an xhr request after
+   *     its readyState is 4 or the result of applying an optional request
+   *     `transformResponse` function to the xhr object after its readyState is 4.
+   *
+   * Options:
+   *
+   *   (Object) sandbox - optional request sandbox.
+   */
+
+
+  _createClass(Transport, [{
+    key: "send",
+    value: function send() {}
+  }]);
+
+  return Transport;
+}();
+
+exports.Transport = Transport;
+
+var Basic = /*#__PURE__*/function (_Transport) {
+  _inherits(Basic, _Transport);
+
+  var _super = _createSuper(Basic);
+
+  /**
+   * @param {dav.Credentials} credentials user authorization.
+   */
+  function Basic(credentials) {
+    _classCallCheck(this, Basic);
+
+    return _super.call(this, credentials);
+  }
+
+  _createClass(Basic, [{
+    key: "send",
+    value: function send(request, url, options) {
+      return (0, _co["default"])( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
+        var sandbox, transformRequest, transformResponse, onerror, xhr, auth, result;
+        return regeneratorRuntime.wrap(function _callee$(_context) {
+          while (1) {
+            switch (_context.prev = _context.next) {
+              case 0:
+                sandbox = options && options.sandbox;
+                transformRequest = request.transformRequest;
+                transformResponse = request.transformResponse;
+                onerror = request.onerror;
+                xhr = new _xmlhttprequest["default"]();
+                if (sandbox) sandbox.add(xhr);
+                xhr.open(request.method, url, true
+                /* async */
+                );
+                auth = "Basic " + (0, _base64util.encode)(this.credentials.username + ":" + this.credentials.password);
+                xhr.setRequestHeader("Authorization", auth);
+                if (transformRequest) transformRequest(xhr);
+                _context.prev = 10;
+                _context.next = 13;
+                return xhr.send(request.requestData);
+
+              case 13:
+                result = transformResponse ? transformResponse(xhr) : xhr;
+                _context.next = 20;
+                break;
+
+              case 16:
+                _context.prev = 16;
+                _context.t0 = _context["catch"](10);
+                if (onerror) onerror(_context.t0);
+                throw _context.t0;
+
+              case 20:
+                return _context.abrupt("return", result);
+
+              case 21:
+              case "end":
+                return _context.stop();
+            }
+          }
+        }, _callee, this, [[10, 16]]);
+      }).bind(this));
+    }
+  }]);
+
+  return Basic;
+}(Transport);
+/**
+ * @param {dav.Credentials} credentials user authorization.
+ */
+
+
+exports.Basic = Basic;
+
+var OAuth2 = /*#__PURE__*/function (_Transport2) {
+  _inherits(OAuth2, _Transport2);
+
+  var _super2 = _createSuper(OAuth2);
+
+  function OAuth2(credentials) {
+    _classCallCheck(this, OAuth2);
+
+    return _super2.call(this, credentials);
+  }
+
+  _createClass(OAuth2, [{
+    key: "send",
+    value: function send(request, url) {
+      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
+      return (0, _co["default"])( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
+        var sandbox, transformRequest, transformResponse, onerror, result, xhr, token;
+        return regeneratorRuntime.wrap(function _callee2$(_context2) {
+          while (1) {
+            switch (_context2.prev = _context2.next) {
+              case 0:
+                sandbox = options.sandbox;
+                transformRequest = request.transformRequest;
+                transformResponse = request.transformResponse;
+                onerror = request.onerror;
+                if (!('retry' in options)) options.retry = true;
+                _context2.prev = 5;
+                _context2.next = 8;
+                return access(this.credentials, options);
+
+              case 8:
+                token = _context2.sent;
+                xhr = new _xmlhttprequest["default"]();
+                if (sandbox) sandbox.add(xhr);
+                xhr.open(request.method, url, true
+                /* async */
+                );
+                xhr.setRequestHeader('Authorization', "Bearer ".concat(token));
+                if (transformRequest) transformRequest(xhr);
+                _context2.next = 16;
+                return xhr.send(request.requestData);
+
+              case 16:
+                result = transformResponse ? transformResponse(xhr) : xhr;
+                _context2.next = 27;
+                break;
+
+              case 19:
+                _context2.prev = 19;
+                _context2.t0 = _context2["catch"](5);
+
+                if (!(options.retry && xhr.status === 401)) {
+                  _context2.next = 25;
+                  break;
+                }
+
+                // Force expiration.
+                this.credentials.expiration = 0; // Retry once at most.
+
+                options.retry = false;
+                return _context2.abrupt("return", this.send(request, url, options));
+
+              case 25:
+                if (onerror) onerror(_context2.t0);
+                throw _context2.t0;
+
+              case 27:
+                return _context2.abrupt("return", result);
+
+              case 28:
+              case "end":
+                return _context2.stop();
+            }
+          }
+        }, _callee2, this, [[5, 19]]);
+      }).bind(this));
+    }
+  }]);
+
+  return OAuth2;
+}(Transport);
+/**
+ * @return {Promise} promise that will resolve with access token.
+ */
+
+
+exports.OAuth2 = OAuth2;
+
+function access(credentials, options) {
+  if (!credentials.accessToken) {
+    return getAccessToken(credentials, options);
+  }
+
+  if (credentials.refreshToken && isExpired(credentials)) {
+    return refreshAccessToken(credentials, options);
+  }
+
+  return Promise.resolve(credentials.accessToken);
+}
+
+function isExpired(credentials) {
+  return typeof credentials.expiration === 'number' && Date.now() > credentials.expiration;
+}
+
+var getAccessToken = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(credentials, options) {
+  var sandbox, xhr, data, now, response;
+  return regeneratorRuntime.wrap(function _callee3$(_context3) {
+    while (1) {
+      switch (_context3.prev = _context3.next) {
+        case 0:
+          sandbox = options.sandbox;
+          xhr = new _xmlhttprequest["default"]();
+          if (sandbox) sandbox.add(xhr);
+          xhr.open('POST', credentials.tokenUrl, true
+          /* async */
+          );
+          xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+          data = _querystring["default"].stringify({
+            code: credentials.authorizationCode,
+            redirect_uri: credentials.redirectUrl,
+            client_id: credentials.clientId,
+            client_secret: credentials.clientSecret,
+            grant_type: 'authorization_code'
+          });
+          now = Date.now();
+          _context3.next = 9;
+          return xhr.send(data);
+
+        case 9:
+          response = JSON.parse(xhr.responseText);
+          credentials.accessToken = response.access_token;
+          credentials.refreshToken = 'refresh_token' in response ? response.refresh_token : null;
+          credentials.expiration = 'expires_in' in response ? now + response.expires_in : null;
+          return _context3.abrupt("return", response.access_token);
+
+        case 14:
+        case "end":
+          return _context3.stop();
+      }
+    }
+  }, _callee3);
+}));
+
+var refreshAccessToken = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(credentials, options) {
+  var sandbox, xhr, data, now, response;
+  return regeneratorRuntime.wrap(function _callee4$(_context4) {
+    while (1) {
+      switch (_context4.prev = _context4.next) {
+        case 0:
+          sandbox = options.sandbox;
+          xhr = new _xmlhttprequest["default"]();
+          if (sandbox) sandbox.add(xhr);
+          xhr.open('POST', credentials.tokenUrl, true
+          /* async */
+          );
+          xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+          data = _querystring["default"].stringify({
+            client_id: credentials.clientId,
+            client_secret: credentials.clientSecret,
+            refresh_token: credentials.refreshToken,
+            grant_type: 'refresh_token'
+          });
+          now = Date.now();
+          _context4.next = 9;
+          return xhr.send(data);
+
+        case 9:
+          response = JSON.parse(xhr.responseText);
+          credentials.accessToken = response.access_token;
+          credentials.expiration = 'expires_in' in response ? now + response.expires_in : null;
+          return _context4.abrupt("return", response.access_token);
+
+        case 13:
+        case "end":
+          return _context4.stop();
+      }
+    }
+  }, _callee4);
+}));
+
+},{"./xmlhttprequest":22,"base64util":24,"co":26,"querystring":35}],21:[function(require,module,exports){
+"use strict";
+
+function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports.createObject = createObject;
+exports.updateObject = updateObject;
+exports.deleteObject = deleteObject;
+exports.syncCollection = syncCollection;
+exports.isCollectionDirty = exports.supportedReportSet = void 0;
+
+var _co = _interopRequireDefault(require("co"));
+
+var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
+
+var ns = _interopRequireWildcard(require("./namespace"));
+
+var request = _interopRequireWildcard(require("./request"));
+
+function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
+
+function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
+
+var debug = require('debug')('dav:webdav');
+/**
+ * @param {String} objectUrl url for webdav object.
+ * @param {String} objectData webdav object data.
+ */
+
+
+function createObject(objectUrl, objectData, options) {
+  var req = request.basic({
+    method: 'PUT',
+    data: objectData,
+    contentType: options.contentType
+  });
+  return options.xhr.send(req, objectUrl, {
+    sandbox: options.sandbox
+  });
+}
+
+function updateObject(objectUrl, objectData, etag, options) {
+  var req = request.basic({
+    method: 'PUT',
+    data: objectData,
+    etag: etag,
+    contentType: options.contentType
+  });
+  return options.xhr.send(req, objectUrl, {
+    sandbox: options.sandbox
+  });
+}
+
+function deleteObject(objectUrl, etag, options) {
+  var req = request.basic({
+    method: 'DELETE',
+    etag: etag
+  });
+  return options.xhr.send(req, objectUrl, {
+    sandbox: options.sandbox
+  });
+}
+
+function syncCollection(collection, options) {
+  var syncMethod;
+
+  if ('syncMethod' in options) {
+    syncMethod = options.syncMethod;
+  } else if (collection.reports && collection.reports.indexOf('syncCollection') !== -1) {
+    syncMethod = 'webdav';
+  } else {
+    syncMethod = 'basic';
+  }
+
+  if (syncMethod === 'webdav') {
+    debug('rfc 6578 sync.');
+    return options.webdavSync(collection, options);
+  } else {
+    debug('basic sync.');
+    return options.basicSync(collection, options);
+  }
+}
+/**
+ * @param {dav.DAVCollection} collection to fetch report set for.
+ */
+
+
+var supportedReportSet = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(collection, options) {
+  var req, response;
+  return regeneratorRuntime.wrap(function _callee$(_context) {
+    while (1) {
+      switch (_context.prev = _context.next) {
+        case 0:
+          debug('Checking supported report set for collection at ' + collection.url);
+          req = request.propfind({
+            props: [{
+              name: 'supported-report-set',
+              namespace: ns.DAV
+            }],
+            depth: 1,
+            mergeResponses: true
+          });
+          _context.next = 4;
+          return options.xhr.send(req, collection.url, {
+            sandbox: options.sandbox
+          });
+
+        case 4:
+          response = _context.sent;
+          return _context.abrupt("return", response.props.supportedReportSet);
+
+        case 6:
+        case "end":
+          return _context.stop();
+      }
+    }
+  }, _callee);
+}));
+
+exports.supportedReportSet = supportedReportSet;
+
+var isCollectionDirty = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(collection, options) {
+  var req, responses, response;
+  return regeneratorRuntime.wrap(function _callee2$(_context2) {
+    while (1) {
+      switch (_context2.prev = _context2.next) {
+        case 0:
+          if (collection.ctag) {
+            _context2.next = 3;
+            break;
+          }
+
+          debug('Missing ctag.');
+          return _context2.abrupt("return", false);
+
+        case 3:
+          debug('Fetch remote getctag prop.');
+          req = request.propfind({
+            props: [{
+              name: 'getctag',
+              namespace: ns.CALENDAR_SERVER
+            }],
+            depth: 0
+          });
+          _context2.next = 7;
+          return options.xhr.send(req, collection.account.homeUrl, {
+            sandbox: options.sandbox
+          });
+
+        case 7:
+          responses = _context2.sent;
+          response = responses.filter(function (response) {
+            // Find the response that corresponds to the parameter collection.
+            return (0, _fuzzy_url_equals["default"])(collection.url, response.href);
+          })[0];
+
+          if (response) {
+            _context2.next = 11;
+            break;
+          }
+
+          throw new Error('Could not find collection on remote. Was it deleted?');
+
+        case 11:
+          debug('Check whether cached ctag matches remote.');
+          return _context2.abrupt("return", collection.ctag !== response.props.getctag);
+
+        case 13:
+        case "end":
+          return _context2.stop();
+      }
+    }
+  }, _callee2);
+}));
+
+exports.isCollectionDirty = isCollectionDirty;
+
+},{"./fuzzy_url_equals":6,"./namespace":9,"./request":11,"co":26,"debug":27}],22:[function(require,module,exports){
+"use strict";
+
+Object.defineProperty(exports, "__esModule", {
+  value: true
+});
+exports["default"] = void 0;
+
+function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
+
+function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
+
+function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
+
+var debug = require('debug')('dav:xmlhttprequest');
+
+var Native;
+
+if (typeof self !== 'undefined' && 'XMLHttpRequest' in self) {
+  Native = self.XMLHttpRequest;
+} else {
+  // Trick browserify into not loading XMLHttpRequest polyfill
+  // since it is available in the platform (including web workers)
+  Native = require(false || 'xmlhttprequest').XMLHttpRequest;
+}
+/**
+ * @fileoverview Promise wrapper around native xhr api.
+ */
+
+
+var XMLHttpRequest = /*#__PURE__*/function () {
+  function XMLHttpRequest(options) {
+    var _this = this;
+
+    _classCallCheck(this, XMLHttpRequest);
+
+    this.request = new Native(options);
+    this.sandbox = null;
+    /* readwrite */
+
+    ['response', 'responseText', 'responseType', 'responseXML', 'timeout', 'upload', 'withCredentials'].forEach(function (attribute) {
+      Object.defineProperty(_this, attribute, {
+        get: function get() {
+          return this.request[attribute];
+        },
+        set: function set(value) {
+          this.request[attribute] = value;
+        }
+      });
+    });
+    /* readonly */
+
+    ['status', 'statusText'].forEach(function (attribute) {
+      Object.defineProperty(_this, attribute, {
+        get: function get() {
+          return this.request[attribute];
+        }
+      });
+    });
+  }
+
+  _createClass(XMLHttpRequest, [{
+    key: "abort",
+    value: function abort() {
+      return this._callNative('abort', arguments);
+    }
+  }, {
+    key: "getAllResponseHeaders",
+    value: function getAllResponseHeaders() {
+      return this._callNative('getAllResponseHeaders', arguments);
+    }
+  }, {
+    key: "getResponseHeader",
+    value: function getResponseHeader() {
+      return this._callNative('getResponseHeader', arguments);
+    }
+  }, {
+    key: "open",
+    value: function open() {
+      return this._callNative('open', arguments);
+    }
+  }, {
+    key: "overrideMimeType",
+    value: function overrideMimeType() {
+      return this._callNative('overrideMimeType', arguments);
+    }
+  }, {
+    key: "setRequestHeader",
+    value: function setRequestHeader() {
+      return this._callNative('setRequestHeader', arguments);
+    }
+  }, {
+    key: "send",
+    value: function send(data) {
+      debug("Sending request data: ".concat(data));
+      if (this.sandbox) this.sandbox.add(this);
+      var request = this.request;
+      request.send(data);
+      return new Promise(function (resolve, reject) {
+        request.onreadystatechange = function () {
+          if (request.readyState !== 4
+          /* done */
+          ) {
+              return;
+            }
+
+          if (request.status < 200 || request.status >= 400) {
+            return reject(new Error("Bad status: ".concat(request.status)));
+          }
+
+          return resolve(request.responseText);
+        };
+
+        request.ontimeout = function () {
+          reject(new Error("Request timed out after ".concat(request.timeout, " ms")));
+        };
+      });
+    }
+  }, {
+    key: "_callNative",
+    value: function _callNative(method, args) {
+      return this.request[method].apply(this.request, args);
+    }
+  }]);
+
+  return XMLHttpRequest;
+}();
+
+exports["default"] = XMLHttpRequest;
+
+},{"debug":27}],23:[function(require,module,exports){
 'use strict'
 
 exports.byteLength = byteLength
@@ -774,7 +3835,317 @@ function fromByteArray (uint8) {
   return parts.join('')
 }
 
-},{}],2:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
+(function (Buffer){(function (){
+(function (global, factory) {
+    typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
+    typeof define === 'function' && define.amd ? define(['exports'], factory) :
+    (global = global || self, factory(global.base64 = {}));
+}(this, (function (exports) { 'use strict';
+
+    var b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+
+    /*globals atob, Buffer*/
+    // Modern browsers have atob and btoa defined
+
+    var atobBrowser = typeof atob == 'function' && atob; // Node.js
+
+    function atobNode(data) {
+      return Buffer.from(data, 'base64').toString('binary');
+    } // Out custom implementation (polyfill)
+
+    var b64i;
+    var wsReg = /[\t\n\r\x20\x0C]+/g;
+    var chr = String.fromCharCode; // if ( typeof chr.bind == 'function' ) chr = chr.bind(String);
+
+    /**
+     * Decodes UTF8 or byte string
+     *
+     * @param {String} data
+     */
+
+    function atobJS(data) {
+      if (!data) return data;
+      data = String(data).replace(wsReg, '');
+      var o1,
+          o2,
+          o3,
+          h1,
+          h2,
+          h3,
+          h4,
+          bits,
+          l = data.length,
+          i = 0,
+          ac = 0,
+          dec = '',
+          tmp_arr = [];
+
+      if (b64i == undefined) {
+        b64i = {};
+
+        for (var j = 0, bl = b64.length; j < bl; j++) {
+          b64i[b64.charAt(j)] = j;
+        }
+      }
+
+      do {
+        // unpack four hexets into three octets using index points in b64
+        h1 = b64i[data.charAt(i++)];
+        h2 = b64i[data.charAt(i++)];
+        h3 = b64i[data.charAt(i++)];
+        h4 = b64i[data.charAt(i++)];
+        bits = h1 << 18 | h2 << 12 | h3 << 6 | h4;
+        o1 = bits >> 16 & 0xff;
+        o2 = bits >> 8 & 0xff;
+        o3 = bits & 0xff;
+
+        if (h3 == 64) {
+          tmp_arr[ac++] = chr(o1);
+        } else if (h4 == 64) {
+          tmp_arr[ac++] = chr(o1, o2);
+        } else {
+          tmp_arr[ac++] = chr(o1, o2, o3);
+        }
+      } while (i < l);
+
+      dec = tmp_arr.join('');
+      return dec.replace(/\0+$/, '');
+    }
+
+    var _atob = atobBrowser || typeof Buffer == 'function' && atobNode || atobJS;
+
+    /*globals btoa, Buffer*/
+    // Modern browsers have atob and btoa defined
+
+    var btoaBrowser = typeof btoa == 'function' && btoa; // Node.js
+
+    function btoaNode(data) {
+      return Buffer.from(data, 'binary').toString('base64');
+    } // Out custom implementation (polyfill)
+
+    /**
+     * Encodes UTF8 or byte string
+     *
+     * @param {String} data
+     */
+
+    function btoaJS(data) {
+      if (!data) return data;
+      var o1,
+          o2,
+          o3,
+          h1,
+          h2,
+          h3,
+          h4,
+          bits,
+          i = 0,
+          ac = 0,
+          enc = '',
+          tmp_arr = [];
+
+      do {
+        // pack three octets into four hexets
+        o1 = data.charCodeAt(i++);
+        o2 = data.charCodeAt(i++);
+        o3 = data.charCodeAt(i++);
+        bits = o1 << 16 | o2 << 8 | o3;
+        h1 = bits >> 18 & 0x3f;
+        h2 = bits >> 12 & 0x3f;
+        h3 = bits >> 6 & 0x3f;
+        h4 = bits & 0x3f; // use hexets to index into b64, and append result to encoded string
+
+        tmp_arr[ac++] = b64.charAt(h1) + b64.charAt(h2) + b64.charAt(h3) + b64.charAt(h4);
+      } while (i < data.length);
+
+      enc = tmp_arr.join('');
+      var r = data.length % 3;
+      return (r ? enc.slice(0, r - 3) : enc) + '==='.slice(r || 3);
+    }
+
+    var _btoa = btoaBrowser || typeof Buffer == 'function' && btoaNode || btoaJS;
+
+    /*globals unescape, escape, decodeURIComponent, encodeURI*/
+    /// Encode multi-byte into UTF-8 string
+    function utf8Encode(str) {
+      return unescape(encodeURI(str));
+    } /// Decode UTF-8 string to multi-byte string
+
+    function utf8Decode(str) {
+      return decodeURIComponent(escape(str));
+    }
+
+    /**
+    *  Base64 string encoding and decoding utility.
+    *
+    *  play @ https://duzun.me/playground/encode#base64Encode=Test%20String%20
+    *
+    *  original of _btoa and _atob by: Tyler Akins (http://rumkin.com)
+    *
+    *
+    *  @license MIT
+    *  @version 2.1.0
+    *  @author Dumitru Uzun (DUzun.Me)
+    */
+    var VERSION = '2.1.0';
+
+    function byteDecode(data) {
+      var ret = data;
+
+      if (ret) {
+        ret = _atob(String(ret).replace(/_/g, '/').replace(/-/g, '+'));
+      }
+
+      return ret;
+    } // Encode byte-string - 8bit per char - used for binary data
+
+    function mbEncode(data) {
+      if (!data) return data;
+      return _btoa(utf8Encode(data));
+    } // Decodes to multi-byte string if utf8-encoded
+
+    function mbDecode(data, force_utf8) {
+      var ret = byteDecode(data);
+
+      if (ret) {
+        if (force_utf8) {
+          return utf8Decode(ret);
+        } else {
+          try {
+            ret = utf8Decode(ret);
+          } catch (err) {}
+        }
+      }
+
+      return ret;
+    } // Encode for URL
+
+    function byteUrlEncode(data) {
+      var ret = _btoa(data);
+
+      return ret && ret.replace(/\=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+    } // Decode from byteUrlEncode()
+
+    function byteUrlDecode(data, force_utf8) {
+      var ret = data;
+
+      if (ret) {
+        ret += '==='.substr(0, 3 - (ret.length + 3) % 4);
+        ret = byteDecode(ret);
+      }
+
+      return ret;
+    } // Encode as base64 a multi-byte string as utf8 for URL
+
+    function mbUrlEncode(data) {
+      if (!data) return data;
+      var ret = utf8Encode(data);
+      return byteUrlEncode(ret);
+    } // Decode base64 of utf8 encoded text to multi-byte string
+
+    function mbUrlDecode(data) {
+      var ret = byteUrlDecode(data);
+      return ret && utf8Decode(ret);
+    } // multi-byte string - common JS String - used for text data - get encoded/decoded to/from utf8
+
+    function polyfill(global) {
+      if (!global) {
+        global = typeof window == 'undefined' ? typeof global == 'undefined' ? typeof self == 'undefined' ? this || new Function('return this')() : self : global : window;
+      }
+
+      if (global) {
+        if (typeof atob == 'undefined') {
+          global.atob = _atob;
+        }
+
+        if (typeof btoa == 'undefined') {
+          global.btoa = _btoa;
+        }
+      }
+    }
+    function bindProto(__) {
+      var __ex = typeof Object.defineProperty == 'function' ? function (name, func
+      /*, proto*/
+      ) {
+        Object.defineProperty(
+        /*proto||*/
+        __, name, {
+          value: func,
+          configurable: true,
+          enumerable: false,
+          writeable: true
+        });
+      } : function (name, func
+      /*, proto*/
+      ) {
+        // Take care with (for ... in) on strings!
+
+        /*proto||*/
+        __[name] = func;
+      };
+
+      __ex('base64ByteEncode', function () {
+        return _btoa(this);
+      });
+
+      __ex('base64ByteDecode', function () {
+        return byteDecode(this);
+      });
+
+      __ex('base64Encode', function () {
+        return mbEncode(this);
+      });
+
+      __ex('base64Decode', function () {
+        return mbDecode(this);
+      });
+
+      __ex('base64ByteUrlEncode', function () {
+        return byteUrlEncode(this);
+      });
+
+      __ex('base64ByteUrlDecode', function () {
+        return byteUrlDecode(this);
+      });
+
+      __ex('base64UrlEncode', function () {
+        return mbUrlEncode(this);
+      });
+
+      __ex('base64UrlDecode', function () {
+        return mbUrlDecode(this);
+      });
+    } // Add String.prototype methods:
+    // bindProto(String.prototype);
+
+    exports.VERSION = VERSION;
+    exports._atob = _atob;
+    exports._btoa = _btoa;
+    exports.bindProto = bindProto;
+    exports.byteDecode = byteDecode;
+    exports.byteEncode = _btoa;
+    exports.byteUrlDecode = byteUrlDecode;
+    exports.byteUrlEncode = byteUrlEncode;
+    exports.decode = mbDecode;
+    exports.encode = mbEncode;
+    exports.mb2utf8 = utf8Encode;
+    exports.mbDecode = mbDecode;
+    exports.mbEncode = mbEncode;
+    exports.mbUrlDecode = mbUrlDecode;
+    exports.mbUrlEncode = mbUrlEncode;
+    exports.polyfill = polyfill;
+    exports.urlDecode = mbUrlDecode;
+    exports.urlEncode = mbUrlEncode;
+    exports.utf82mb = utf8Decode;
+
+    Object.defineProperty(exports, '__esModule', { value: true });
+
+})));
+
+
+}).call(this)}).call(this,require("buffer").Buffer)
+},{"buffer":25}],25:[function(require,module,exports){
 (function (Buffer){(function (){
 /*!
  * The buffer module from node.js, for the browser.
@@ -2555,7 +5926,782 @@ function numberIsNaN (obj) {
 }
 
 }).call(this)}).call(this,require("buffer").Buffer)
-},{"base64-js":1,"buffer":2,"ieee754":3}],3:[function(require,module,exports){
+},{"base64-js":23,"buffer":25,"ieee754":29}],26:[function(require,module,exports){
+
+/**
+ * slice() reference.
+ */
+
+var slice = Array.prototype.slice;
+
+/**
+ * Expose `co`.
+ */
+
+module.exports = co['default'] = co.co = co;
+
+/**
+ * Wrap the given generator `fn` into a
+ * function that returns a promise.
+ * This is a separate function so that
+ * every `co()` call doesn't create a new,
+ * unnecessary closure.
+ *
+ * @param {GeneratorFunction} fn
+ * @return {Function}
+ * @api public
+ */
+
+co.wrap = function (fn) {
+  createPromise.__generatorFunction__ = fn;
+  return createPromise;
+  function createPromise() {
+    return co.call(this, fn.apply(this, arguments));
+  }
+};
+
+/**
+ * Execute the generator function or a generator
+ * and return a promise.
+ *
+ * @param {Function} fn
+ * @return {Promise}
+ * @api public
+ */
+
+function co(gen) {
+  var ctx = this;
+  var args = slice.call(arguments, 1)
+
+  // we wrap everything in a promise to avoid promise chaining,
+  // which leads to memory leak errors.
+  // see https://github.com/tj/co/issues/180
+  return new Promise(function(resolve, reject) {
+    if (typeof gen === 'function') gen = gen.apply(ctx, args);
+    if (!gen || typeof gen.next !== 'function') return resolve(gen);
+
+    onFulfilled();
+
+    /**
+     * @param {Mixed} res
+     * @return {Promise}
+     * @api private
+     */
+
+    function onFulfilled(res) {
+      var ret;
+      try {
+        ret = gen.next(res);
+      } catch (e) {
+        return reject(e);
+      }
+      next(ret);
+    }
+
+    /**
+     * @param {Error} err
+     * @return {Promise}
+     * @api private
+     */
+
+    function onRejected(err) {
+      var ret;
+      try {
+        ret = gen.throw(err);
+      } catch (e) {
+        return reject(e);
+      }
+      next(ret);
+    }
+
+    /**
+     * Get the next value in the generator,
+     * return a promise.
+     *
+     * @param {Object} ret
+     * @return {Promise}
+     * @api private
+     */
+
+    function next(ret) {
+      if (ret.done) return resolve(ret.value);
+      var value = toPromise.call(ctx, ret.value);
+      if (value && isPromise(value)) return value.then(onFulfilled, onRejected);
+      return onRejected(new TypeError('You may only yield a function, promise, generator, array, or object, '
+        + 'but the following object was passed: "' + String(ret.value) + '"'));
+    }
+  });
+}
+
+/**
+ * Convert a `yield`ed value into a promise.
+ *
+ * @param {Mixed} obj
+ * @return {Promise}
+ * @api private
+ */
+
+function toPromise(obj) {
+  if (!obj) return obj;
+  if (isPromise(obj)) return obj;
+  if (isGeneratorFunction(obj) || isGenerator(obj)) return co.call(this, obj);
+  if ('function' == typeof obj) return thunkToPromise.call(this, obj);
+  if (Array.isArray(obj)) return arrayToPromise.call(this, obj);
+  if (isObject(obj)) return objectToPromise.call(this, obj);
+  return obj;
+}
+
+/**
+ * Convert a thunk to a promise.
+ *
+ * @param {Function}
+ * @return {Promise}
+ * @api private
+ */
+
+function thunkToPromise(fn) {
+  var ctx = this;
+  return new Promise(function (resolve, reject) {
+    fn.call(ctx, function (err, res) {
+      if (err) return reject(err);
+      if (arguments.length > 2) res = slice.call(arguments, 1);
+      resolve(res);
+    });
+  });
+}
+
+/**
+ * Convert an array of "yieldables" to a promise.
+ * Uses `Promise.all()` internally.
+ *
+ * @param {Array} obj
+ * @return {Promise}
+ * @api private
+ */
+
+function arrayToPromise(obj) {
+  return Promise.all(obj.map(toPromise, this));
+}
+
+/**
+ * Convert an object of "yieldables" to a promise.
+ * Uses `Promise.all()` internally.
+ *
+ * @param {Object} obj
+ * @return {Promise}
+ * @api private
+ */
+
+function objectToPromise(obj){
+  var results = new obj.constructor();
+  var keys = Object.keys(obj);
+  var promises = [];
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var promise = toPromise.call(this, obj[key]);
+    if (promise && isPromise(promise)) defer(promise, key);
+    else results[key] = obj[key];
+  }
+  return Promise.all(promises).then(function () {
+    return results;
+  });
+
+  function defer(promise, key) {
+    // predefine the key in the result
+    results[key] = undefined;
+    promises.push(promise.then(function (res) {
+      results[key] = res;
+    }));
+  }
+}
+
+/**
+ * Check if `obj` is a promise.
+ *
+ * @param {Object} obj
+ * @return {Boolean}
+ * @api private
+ */
+
+function isPromise(obj) {
+  return 'function' == typeof obj.then;
+}
+
+/**
+ * Check if `obj` is a generator.
+ *
+ * @param {Mixed} obj
+ * @return {Boolean}
+ * @api private
+ */
+
+function isGenerator(obj) {
+  return 'function' == typeof obj.next && 'function' == typeof obj.throw;
+}
+
+/**
+ * Check if `obj` is a generator function.
+ *
+ * @param {Mixed} obj
+ * @return {Boolean}
+ * @api private
+ */
+function isGeneratorFunction(obj) {
+  var constructor = obj.constructor;
+  if (!constructor) return false;
+  if ('GeneratorFunction' === constructor.name || 'GeneratorFunction' === constructor.displayName) return true;
+  return isGenerator(constructor.prototype);
+}
+
+/**
+ * Check for plain object.
+ *
+ * @param {Mixed} val
+ * @return {Boolean}
+ * @api private
+ */
+
+function isObject(val) {
+  return Object == val.constructor;
+}
+
+},{}],27:[function(require,module,exports){
+(function (process){(function (){
+/* eslint-env browser */
+
+/**
+ * This is the web browser implementation of `debug()`.
+ */
+
+exports.formatArgs = formatArgs;
+exports.save = save;
+exports.load = load;
+exports.useColors = useColors;
+exports.storage = localstorage();
+exports.destroy = (() => {
+	let warned = false;
+
+	return () => {
+		if (!warned) {
+			warned = true;
+			console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+		}
+	};
+})();
+
+/**
+ * Colors.
+ */
+
+exports.colors = [
+	'#0000CC',
+	'#0000FF',
+	'#0033CC',
+	'#0033FF',
+	'#0066CC',
+	'#0066FF',
+	'#0099CC',
+	'#0099FF',
+	'#00CC00',
+	'#00CC33',
+	'#00CC66',
+	'#00CC99',
+	'#00CCCC',
+	'#00CCFF',
+	'#3300CC',
+	'#3300FF',
+	'#3333CC',
+	'#3333FF',
+	'#3366CC',
+	'#3366FF',
+	'#3399CC',
+	'#3399FF',
+	'#33CC00',
+	'#33CC33',
+	'#33CC66',
+	'#33CC99',
+	'#33CCCC',
+	'#33CCFF',
+	'#6600CC',
+	'#6600FF',
+	'#6633CC',
+	'#6633FF',
+	'#66CC00',
+	'#66CC33',
+	'#9900CC',
+	'#9900FF',
+	'#9933CC',
+	'#9933FF',
+	'#99CC00',
+	'#99CC33',
+	'#CC0000',
+	'#CC0033',
+	'#CC0066',
+	'#CC0099',
+	'#CC00CC',
+	'#CC00FF',
+	'#CC3300',
+	'#CC3333',
+	'#CC3366',
+	'#CC3399',
+	'#CC33CC',
+	'#CC33FF',
+	'#CC6600',
+	'#CC6633',
+	'#CC9900',
+	'#CC9933',
+	'#CCCC00',
+	'#CCCC33',
+	'#FF0000',
+	'#FF0033',
+	'#FF0066',
+	'#FF0099',
+	'#FF00CC',
+	'#FF00FF',
+	'#FF3300',
+	'#FF3333',
+	'#FF3366',
+	'#FF3399',
+	'#FF33CC',
+	'#FF33FF',
+	'#FF6600',
+	'#FF6633',
+	'#FF9900',
+	'#FF9933',
+	'#FFCC00',
+	'#FFCC33'
+];
+
+/**
+ * Currently only WebKit-based Web Inspectors, Firefox >= v31,
+ * and the Firebug extension (any Firefox version) are known
+ * to support "%c" CSS customizations.
+ *
+ * TODO: add a `localStorage` variable to explicitly enable/disable colors
+ */
+
+// eslint-disable-next-line complexity
+function useColors() {
+	// NB: In an Electron preload script, document will be defined but not fully
+	// initialized. Since we know we're in Chrome, we'll just detect this case
+	// explicitly
+	if (typeof window !== 'undefined' && window.process && (window.process.type === 'renderer' || window.process.__nwjs)) {
+		return true;
+	}
+
+	// Internet Explorer and Edge do not support colors.
+	if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/(edge|trident)\/(\d+)/)) {
+		return false;
+	}
+
+	// Is webkit? http://stackoverflow.com/a/16459606/376773
+	// document is undefined in react-native: https://github.com/facebook/react-native/pull/1632
+	return (typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance) ||
+		// Is firebug? http://stackoverflow.com/a/398120/376773
+		(typeof window !== 'undefined' && window.console && (window.console.firebug || (window.console.exception && window.console.table))) ||
+		// Is firefox >= v31?
+		// https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
+		// Double check webkit in userAgent just in case we are in a worker
+		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
+}
+
+/**
+ * Colorize log arguments if enabled.
+ *
+ * @api public
+ */
+
+function formatArgs(args) {
+	args[0] = (this.useColors ? '%c' : '') +
+		this.namespace +
+		(this.useColors ? ' %c' : ' ') +
+		args[0] +
+		(this.useColors ? '%c ' : ' ') +
+		'+' + module.exports.humanize(this.diff);
+
+	if (!this.useColors) {
+		return;
+	}
+
+	const c = 'color: ' + this.color;
+	args.splice(1, 0, c, 'color: inherit');
+
+	// The final "%c" is somewhat tricky, because there could be other
+	// arguments passed either before or after the %c, so we need to
+	// figure out the correct index to insert the CSS into
+	let index = 0;
+	let lastC = 0;
+	args[0].replace(/%[a-zA-Z%]/g, match => {
+		if (match === '%%') {
+			return;
+		}
+		index++;
+		if (match === '%c') {
+			// We only are interested in the *last* %c
+			// (the user may have provided their own)
+			lastC = index;
+		}
+	});
+
+	args.splice(lastC, 0, c);
+}
+
+/**
+ * Invokes `console.debug()` when available.
+ * No-op when `console.debug` is not a "function".
+ * If `console.debug` is not available, falls back
+ * to `console.log`.
+ *
+ * @api public
+ */
+exports.log = console.debug || console.log || (() => {});
+
+/**
+ * Save `namespaces`.
+ *
+ * @param {String} namespaces
+ * @api private
+ */
+function save(namespaces) {
+	try {
+		if (namespaces) {
+			exports.storage.setItem('debug', namespaces);
+		} else {
+			exports.storage.removeItem('debug');
+		}
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+/**
+ * Load `namespaces`.
+ *
+ * @return {String} returns the previously persisted debug modes
+ * @api private
+ */
+function load() {
+	let r;
+	try {
+		r = exports.storage.getItem('debug');
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+
+	// If debug isn't set in LS, and we're in Electron, try to load $DEBUG
+	if (!r && typeof process !== 'undefined' && 'env' in process) {
+		r = process.env.DEBUG;
+	}
+
+	return r;
+}
+
+/**
+ * Localstorage attempts to return the localstorage.
+ *
+ * This is necessary because safari throws
+ * when a user disables cookies/localstorage
+ * and you attempt to access it.
+ *
+ * @return {LocalStorage}
+ * @api private
+ */
+
+function localstorage() {
+	try {
+		// TVMLKit (Apple TV JS Runtime) does not have a window object, just localStorage in the global context
+		// The Browser also has localStorage in the global context.
+		return localStorage;
+	} catch (error) {
+		// Swallow
+		// XXX (@Qix-) should we be logging these?
+	}
+}
+
+module.exports = require('./common')(exports);
+
+const {formatters} = module.exports;
+
+/**
+ * Map %j to `JSON.stringify()`, since no Web Inspectors do that by default.
+ */
+
+formatters.j = function (v) {
+	try {
+		return JSON.stringify(v);
+	} catch (error) {
+		return '[UnexpectedJSONParseError]: ' + error.message;
+	}
+};
+
+}).call(this)}).call(this,require('_process'))
+},{"./common":28,"_process":31}],28:[function(require,module,exports){
+
+/**
+ * This is the common logic for both the Node.js and web browser
+ * implementations of `debug()`.
+ */
+
+function setup(env) {
+	createDebug.debug = createDebug;
+	createDebug.default = createDebug;
+	createDebug.coerce = coerce;
+	createDebug.disable = disable;
+	createDebug.enable = enable;
+	createDebug.enabled = enabled;
+	createDebug.humanize = require('ms');
+	createDebug.destroy = destroy;
+
+	Object.keys(env).forEach(key => {
+		createDebug[key] = env[key];
+	});
+
+	/**
+	* The currently active debug mode names, and names to skip.
+	*/
+
+	createDebug.names = [];
+	createDebug.skips = [];
+
+	/**
+	* Map of special "%n" handling functions, for the debug "format" argument.
+	*
+	* Valid key names are a single, lower or upper-case letter, i.e. "n" and "N".
+	*/
+	createDebug.formatters = {};
+
+	/**
+	* Selects a color for a debug namespace
+	* @param {String} namespace The namespace string for the for the debug instance to be colored
+	* @return {Number|String} An ANSI color code for the given namespace
+	* @api private
+	*/
+	function selectColor(namespace) {
+		let hash = 0;
+
+		for (let i = 0; i < namespace.length; i++) {
+			hash = ((hash << 5) - hash) + namespace.charCodeAt(i);
+			hash |= 0; // Convert to 32bit integer
+		}
+
+		return createDebug.colors[Math.abs(hash) % createDebug.colors.length];
+	}
+	createDebug.selectColor = selectColor;
+
+	/**
+	* Create a debugger with the given `namespace`.
+	*
+	* @param {String} namespace
+	* @return {Function}
+	* @api public
+	*/
+	function createDebug(namespace) {
+		let prevTime;
+		let enableOverride = null;
+
+		function debug(...args) {
+			// Disabled?
+			if (!debug.enabled) {
+				return;
+			}
+
+			const self = debug;
+
+			// Set `diff` timestamp
+			const curr = Number(new Date());
+			const ms = curr - (prevTime || curr);
+			self.diff = ms;
+			self.prev = prevTime;
+			self.curr = curr;
+			prevTime = curr;
+
+			args[0] = createDebug.coerce(args[0]);
+
+			if (typeof args[0] !== 'string') {
+				// Anything else let's inspect with %O
+				args.unshift('%O');
+			}
+
+			// Apply any `formatters` transformations
+			let index = 0;
+			args[0] = args[0].replace(/%([a-zA-Z%])/g, (match, format) => {
+				// If we encounter an escaped % then don't increase the array index
+				if (match === '%%') {
+					return '%';
+				}
+				index++;
+				const formatter = createDebug.formatters[format];
+				if (typeof formatter === 'function') {
+					const val = args[index];
+					match = formatter.call(self, val);
+
+					// Now we need to remove `args[index]` since it's inlined in the `format`
+					args.splice(index, 1);
+					index--;
+				}
+				return match;
+			});
+
+			// Apply env-specific formatting (colors, etc.)
+			createDebug.formatArgs.call(self, args);
+
+			const logFn = self.log || createDebug.log;
+			logFn.apply(self, args);
+		}
+
+		debug.namespace = namespace;
+		debug.useColors = createDebug.useColors();
+		debug.color = createDebug.selectColor(namespace);
+		debug.extend = extend;
+		debug.destroy = createDebug.destroy; // XXX Temporary. Will be removed in the next major release.
+
+		Object.defineProperty(debug, 'enabled', {
+			enumerable: true,
+			configurable: false,
+			get: () => enableOverride === null ? createDebug.enabled(namespace) : enableOverride,
+			set: v => {
+				enableOverride = v;
+			}
+		});
+
+		// Env-specific initialization logic for debug instances
+		if (typeof createDebug.init === 'function') {
+			createDebug.init(debug);
+		}
+
+		return debug;
+	}
+
+	function extend(namespace, delimiter) {
+		const newDebug = createDebug(this.namespace + (typeof delimiter === 'undefined' ? ':' : delimiter) + namespace);
+		newDebug.log = this.log;
+		return newDebug;
+	}
+
+	/**
+	* Enables a debug mode by namespaces. This can include modes
+	* separated by a colon and wildcards.
+	*
+	* @param {String} namespaces
+	* @api public
+	*/
+	function enable(namespaces) {
+		createDebug.save(namespaces);
+
+		createDebug.names = [];
+		createDebug.skips = [];
+
+		let i;
+		const split = (typeof namespaces === 'string' ? namespaces : '').split(/[\s,]+/);
+		const len = split.length;
+
+		for (i = 0; i < len; i++) {
+			if (!split[i]) {
+				// ignore empty strings
+				continue;
+			}
+
+			namespaces = split[i].replace(/\*/g, '.*?');
+
+			if (namespaces[0] === '-') {
+				createDebug.skips.push(new RegExp('^' + namespaces.substr(1) + '$'));
+			} else {
+				createDebug.names.push(new RegExp('^' + namespaces + '$'));
+			}
+		}
+	}
+
+	/**
+	* Disable debug output.
+	*
+	* @return {String} namespaces
+	* @api public
+	*/
+	function disable() {
+		const namespaces = [
+			...createDebug.names.map(toNamespace),
+			...createDebug.skips.map(toNamespace).map(namespace => '-' + namespace)
+		].join(',');
+		createDebug.enable('');
+		return namespaces;
+	}
+
+	/**
+	* Returns true if the given mode name is enabled, false otherwise.
+	*
+	* @param {String} name
+	* @return {Boolean}
+	* @api public
+	*/
+	function enabled(name) {
+		if (name[name.length - 1] === '*') {
+			return true;
+		}
+
+		let i;
+		let len;
+
+		for (i = 0, len = createDebug.skips.length; i < len; i++) {
+			if (createDebug.skips[i].test(name)) {
+				return false;
+			}
+		}
+
+		for (i = 0, len = createDebug.names.length; i < len; i++) {
+			if (createDebug.names[i].test(name)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	* Convert regexp to namespace
+	*
+	* @param {RegExp} regxep
+	* @return {String} namespace
+	* @api private
+	*/
+	function toNamespace(regexp) {
+		return regexp.toString()
+			.substring(2, regexp.toString().length - 2)
+			.replace(/\.\*\?$/, '*');
+	}
+
+	/**
+	* Coerce `val`.
+	*
+	* @param {Mixed} val
+	* @return {Mixed}
+	* @api private
+	*/
+	function coerce(val) {
+		if (val instanceof Error) {
+			return val.stack || val.message;
+		}
+		return val;
+	}
+
+	/**
+	* XXX DO NOT USE. This is a temporary stub function.
+	* XXX It WILL be removed in the next major release.
+	*/
+	function destroy() {
+		console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
+	}
+
+	createDebug.enable(createDebug.load());
+
+	return createDebug;
+}
+
+module.exports = setup;
+
+},{"ms":30}],29:[function(require,module,exports){
 /*! ieee754. BSD-3-Clause License. Feross Aboukhadijeh <https://feross.org/opensource> */
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
@@ -2642,7 +6788,171 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],4:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
+/**
+ * Helpers.
+ */
+
+var s = 1000;
+var m = s * 60;
+var h = m * 60;
+var d = h * 24;
+var w = d * 7;
+var y = d * 365.25;
+
+/**
+ * Parse or format the given `val`.
+ *
+ * Options:
+ *
+ *  - `long` verbose formatting [false]
+ *
+ * @param {String|Number} val
+ * @param {Object} [options]
+ * @throws {Error} throw an error if val is not a non-empty string or a number
+ * @return {String|Number}
+ * @api public
+ */
+
+module.exports = function(val, options) {
+  options = options || {};
+  var type = typeof val;
+  if (type === 'string' && val.length > 0) {
+    return parse(val);
+  } else if (type === 'number' && isFinite(val)) {
+    return options.long ? fmtLong(val) : fmtShort(val);
+  }
+  throw new Error(
+    'val is not a non-empty string or a valid number. val=' +
+      JSON.stringify(val)
+  );
+};
+
+/**
+ * Parse the given `str` and return milliseconds.
+ *
+ * @param {String} str
+ * @return {Number}
+ * @api private
+ */
+
+function parse(str) {
+  str = String(str);
+  if (str.length > 100) {
+    return;
+  }
+  var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
+    str
+  );
+  if (!match) {
+    return;
+  }
+  var n = parseFloat(match[1]);
+  var type = (match[2] || 'ms').toLowerCase();
+  switch (type) {
+    case 'years':
+    case 'year':
+    case 'yrs':
+    case 'yr':
+    case 'y':
+      return n * y;
+    case 'weeks':
+    case 'week':
+    case 'w':
+      return n * w;
+    case 'days':
+    case 'day':
+    case 'd':
+      return n * d;
+    case 'hours':
+    case 'hour':
+    case 'hrs':
+    case 'hr':
+    case 'h':
+      return n * h;
+    case 'minutes':
+    case 'minute':
+    case 'mins':
+    case 'min':
+    case 'm':
+      return n * m;
+    case 'seconds':
+    case 'second':
+    case 'secs':
+    case 'sec':
+    case 's':
+      return n * s;
+    case 'milliseconds':
+    case 'millisecond':
+    case 'msecs':
+    case 'msec':
+    case 'ms':
+      return n;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Short format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtShort(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return Math.round(ms / d) + 'd';
+  }
+  if (msAbs >= h) {
+    return Math.round(ms / h) + 'h';
+  }
+  if (msAbs >= m) {
+    return Math.round(ms / m) + 'm';
+  }
+  if (msAbs >= s) {
+    return Math.round(ms / s) + 's';
+  }
+  return ms + 'ms';
+}
+
+/**
+ * Long format for `ms`.
+ *
+ * @param {Number} ms
+ * @return {String}
+ * @api private
+ */
+
+function fmtLong(ms) {
+  var msAbs = Math.abs(ms);
+  if (msAbs >= d) {
+    return plural(ms, msAbs, d, 'day');
+  }
+  if (msAbs >= h) {
+    return plural(ms, msAbs, h, 'hour');
+  }
+  if (msAbs >= m) {
+    return plural(ms, msAbs, m, 'minute');
+  }
+  if (msAbs >= s) {
+    return plural(ms, msAbs, s, 'second');
+  }
+  return ms + ' ms';
+}
+
+/**
+ * Pluralization helper.
+ */
+
+function plural(ms, msAbs, n, name) {
+  var isPlural = msAbs >= n * 1.5;
+  return Math.round(ms / n) + ' ' + name + (isPlural ? 's' : '');
+}
+
+},{}],31:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -2828,7 +7138,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],5:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 (function (global){(function (){
 /*! https://mths.be/punycode v1.4.1 by @mathias */
 ;(function(root) {
@@ -3365,7 +7675,7 @@ process.umask = function() { return 0; };
 }(this));
 
 }).call(this)}).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],6:[function(require,module,exports){
+},{}],33:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3451,7 +7761,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],7:[function(require,module,exports){
+},{}],34:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -3538,13 +7848,13 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],8:[function(require,module,exports){
+},{}],35:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":6,"./encode":7}],9:[function(require,module,exports){
+},{"./decode":33,"./encode":34}],36:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -4278,7 +8588,7 @@ Url.prototype.parseHost = function() {
   if (host) this.hostname = host;
 };
 
-},{"./util":10,"punycode":5,"querystring":8}],10:[function(require,module,exports){
+},{"./util":37,"punycode":32,"querystring":35}],37:[function(require,module,exports){
 'use strict';
 
 module.exports = {
@@ -4295,4310 +8605,6 @@ module.exports = {
     return arg == null;
   }
 };
-
-},{}],11:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-var _co = _interopRequireDefault(require("co"));
-
-var _url = _interopRequireDefault(require("url"));
-
-var _calendars = require("./calendars");
-
-var _contacts = require("./contacts");
-
-var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
-
-var _model = require("./model");
-
-var ns = _interopRequireWildcard(require("./namespace"));
-
-var request = _interopRequireWildcard(require("./request"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-var debug = require('debug')('dav:accounts');
-
-var defaults = {
-  accountType: 'caldav',
-  loadCollections: true,
-  loadObjects: false
-};
-/**
- * rfc 6764.
- *
- * @param {dav.Account} account to find root url for.
- */
-
-var serviceDiscovery = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(account, options) {
-  var endpoint, uri, req, xhr, location;
-  return regeneratorRuntime.wrap(function _callee$(_context) {
-    while (1) {
-      switch (_context.prev = _context.next) {
-        case 0:
-          debug('Attempt service discovery.');
-          endpoint = _url["default"].parse(account.server);
-          endpoint.protocol = endpoint.protocol || 'http'; // TODO(gareth) https?
-
-          uri = _url["default"].format({
-            protocol: endpoint.protocol,
-            host: endpoint.host,
-            pathname: "/.well-known/".concat(options.accountType)
-          });
-          req = request.basic({
-            method: 'GET'
-          });
-          _context.prev = 5;
-          _context.next = 8;
-          return options.xhr.send(req, uri, {
-            sandbox: options.sandbox
-          });
-
-        case 8:
-          xhr = _context.sent;
-
-          if (!(xhr.status >= 300 && xhr.status < 400)) {
-            _context.next = 14;
-            break;
-          }
-
-          // http redirect.
-          location = xhr.getResponseHeader('Location');
-
-          if (!(typeof location === 'string' && location.length)) {
-            _context.next = 14;
-            break;
-          }
-
-          debug("Discovery redirected to ".concat(location));
-          return _context.abrupt("return", _url["default"].format({
-            protocol: endpoint.protocol,
-            host: endpoint.host,
-            pathname: location
-          }));
-
-        case 14:
-          _context.next = 19;
-          break;
-
-        case 16:
-          _context.prev = 16;
-          _context.t0 = _context["catch"](5);
-          debug('Discovery failed... failover to the provided url');
-
-        case 19:
-          return _context.abrupt("return", endpoint.href);
-
-        case 20:
-        case "end":
-          return _context.stop();
-      }
-    }
-  }, _callee, null, [[5, 16]]);
-}));
-/**
- * rfc 5397.
- *
- * @param {dav.Account} account to get principal url for.
- */
-
-
-var principalUrl = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
-  var req, res, container;
-  return regeneratorRuntime.wrap(function _callee2$(_context2) {
-    while (1) {
-      switch (_context2.prev = _context2.next) {
-        case 0:
-          debug("Fetch principal url from context path ".concat(account.rootUrl, "."));
-          req = request.propfind({
-            props: [{
-              name: 'current-user-principal',
-              namespace: ns.DAV
-            }],
-            depth: 0,
-            mergeResponses: true
-          });
-          _context2.next = 4;
-          return options.xhr.send(req, account.rootUrl, {
-            sandbox: options.sandbox
-          });
-
-        case 4:
-          res = _context2.sent;
-          container = res.props;
-          debug("Received principal: ".concat(container.currentUserPrincipal));
-          return _context2.abrupt("return", _url["default"].resolve(account.rootUrl, container.currentUserPrincipal));
-
-        case 8:
-        case "end":
-          return _context2.stop();
-      }
-    }
-  }, _callee2);
-}));
-/**
- * @param {dav.Account} account to get home url for.
- */
-
-
-var homeUrl = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(account, options) {
-  var prop, req, responses, response, container, href;
-  return regeneratorRuntime.wrap(function _callee3$(_context3) {
-    while (1) {
-      switch (_context3.prev = _context3.next) {
-        case 0:
-          debug("Fetch home url from principal url ".concat(account.principalUrl, "."));
-
-          if (options.accountType === 'caldav') {
-            prop = {
-              name: 'calendar-home-set',
-              namespace: ns.CALDAV
-            };
-          } else if (options.accountType === 'carddav') {
-            prop = {
-              name: 'addressbook-home-set',
-              namespace: ns.CARDDAV
-            };
-          }
-
-          req = request.propfind({
-            props: [prop],
-            depth: 0
-          });
-          _context3.next = 5;
-          return options.xhr.send(req, account.principalUrl, {
-            sandbox: options.sandbox
-          });
-
-        case 5:
-          responses = _context3.sent;
-          response = responses.find(function (response) {
-            return (0, _fuzzy_url_equals["default"])(account.principalUrl, response.href);
-          });
-          container = response.props;
-
-          if (options.accountType === 'caldav') {
-            debug("Received home: ".concat(container.calendarHomeSet));
-            href = container.calendarHomeSet;
-          } else if (options.accountType === 'carddav') {
-            debug("Received home: ".concat(container.addressbookHomeSet));
-            href = container.addressbookHomeSet;
-          }
-
-          return _context3.abrupt("return", _url["default"].resolve(account.rootUrl, href));
-
-        case 10:
-        case "end":
-          return _context3.stop();
-      }
-    }
-  }, _callee3);
-}));
-/**
- * Options:
- *
- *   (String) accountType - one of 'caldav' or 'carddav'. Defaults to 'caldav'.
- *   (Array.<Object>) filters - list of caldav filters to send with request.
- *   (Boolean) loadCollections - whether or not to load dav collections.
- *   (Boolean) loadObjects - whether or not to load dav objects.
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (String) server - some url for server (needn't be base url).
- *   (String) timezone - VTIMEZONE calendar object.
- *   (dav.Transport) xhr - request sender.
- *
- * @return {Promise} a promise that will resolve with a dav.Account object.
- */
-
-
-exports.createAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(options) {
-  var account, key, loadCollections, loadObjects, collections;
-  return regeneratorRuntime.wrap(function _callee5$(_context5) {
-    while (1) {
-      switch (_context5.prev = _context5.next) {
-        case 0:
-          options = Object.assign({}, defaults, options);
-
-          if (typeof options.loadObjects !== 'boolean') {
-            options.loadObjects = options.loadCollections;
-          }
-
-          account = new _model.Account({
-            server: options.server,
-            credentials: options.xhr.credentials
-          });
-          _context5.next = 5;
-          return serviceDiscovery(account, options);
-
-        case 5:
-          account.rootUrl = _context5.sent;
-          _context5.next = 8;
-          return principalUrl(account, options);
-
-        case 8:
-          account.principalUrl = _context5.sent;
-          _context5.next = 11;
-          return homeUrl(account, options);
-
-        case 11:
-          account.homeUrl = _context5.sent;
-
-          if (options.loadCollections) {
-            _context5.next = 14;
-            break;
-          }
-
-          return _context5.abrupt("return", account);
-
-        case 14:
-          if (options.accountType === 'caldav') {
-            key = 'calendars';
-            loadCollections = _calendars.listCalendars;
-            loadObjects = _calendars.listCalendarObjects;
-          } else if (options.accountType === 'carddav') {
-            key = 'addressBooks';
-            loadCollections = _contacts.listAddressBooks;
-            loadObjects = _contacts.listVCards;
-          }
-
-          _context5.next = 17;
-          return loadCollections(account, options);
-
-        case 17:
-          collections = _context5.sent;
-          account[key] = collections;
-
-          if (options.loadObjects) {
-            _context5.next = 21;
-            break;
-          }
-
-          return _context5.abrupt("return", account);
-
-        case 21:
-          _context5.next = 23;
-          return collections.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(collection) {
-            return regeneratorRuntime.wrap(function _callee4$(_context4) {
-              while (1) {
-                switch (_context4.prev = _context4.next) {
-                  case 0:
-                    _context4.prev = 0;
-                    _context4.next = 3;
-                    return loadObjects(collection, options);
-
-                  case 3:
-                    collection.objects = _context4.sent;
-                    _context4.next = 9;
-                    break;
-
-                  case 6:
-                    _context4.prev = 6;
-                    _context4.t0 = _context4["catch"](0);
-                    collection.error = _context4.t0;
-
-                  case 9:
-                  case "end":
-                    return _context4.stop();
-                }
-              }
-            }, _callee4, null, [[0, 6]]);
-          })));
-
-        case 23:
-          account[key] = account[key].filter(function (collection) {
-            return !collection.error;
-          });
-          return _context5.abrupt("return", account);
-
-        case 25:
-        case "end":
-          return _context5.stop();
-      }
-    }
-  }, _callee5);
-}));
-
-},{"./calendars":12,"./contacts":15,"./fuzzy_url_equals":16,"./model":18,"./namespace":19,"./request":21,"co":34,"debug":35,"url":9}],12:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.createCalendarObject = createCalendarObject;
-exports.updateCalendarObject = updateCalendarObject;
-exports.deleteCalendarObject = deleteCalendarObject;
-exports.syncCalendar = syncCalendar;
-exports.syncCaldavAccount = exports.listCalendarObjects = exports.listCalendars = void 0;
-
-var _co = _interopRequireDefault(require("co"));
-
-var _url = _interopRequireDefault(require("url"));
-
-var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
-
-var _model = require("./model");
-
-var ns = _interopRequireWildcard(require("./namespace"));
-
-var request = _interopRequireWildcard(require("./request"));
-
-var webdav = _interopRequireWildcard(require("./webdav"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-var debug = require('debug')('dav:calendars');
-
-var ICAL_OBJS = new Set(['VEVENT', 'VTODO', 'VJOURNAL', 'VFREEBUSY', 'VTIMEZONE', 'VALARM']);
-/**
- * @param {dav.Account} account to fetch calendars for.
- */
-
-var listCalendars = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
-  var req, responses, cals;
-  return regeneratorRuntime.wrap(function _callee2$(_context2) {
-    while (1) {
-      switch (_context2.prev = _context2.next) {
-        case 0:
-          debug("Fetch calendars from home url ".concat(account.homeUrl));
-          req = request.propfind({
-            props: [{
-              name: 'calendar-description',
-              namespace: ns.CALDAV
-            }, {
-              name: 'calendar-timezone',
-              namespace: ns.CALDAV
-            }, {
-              name: 'displayname',
-              namespace: ns.DAV
-            }, {
-              name: 'getctag',
-              namespace: ns.CALENDAR_SERVER
-            }, {
-              name: 'resourcetype',
-              namespace: ns.DAV
-            }, {
-              name: 'supported-calendar-component-set',
-              namespace: ns.CALDAV
-            }, {
-              name: 'sync-token',
-              namespace: ns.DAV
-            }],
-            depth: 1
-          });
-          _context2.next = 4;
-          return options.xhr.send(req, account.homeUrl, {
-            sandbox: options.sandbox
-          });
-
-        case 4:
-          responses = _context2.sent;
-          debug("Found ".concat(responses.length, " calendars."));
-          cals = responses.filter(function (res) {
-            return res.props.resourcetype.includes('calendar');
-          }).filter(function (res) {
-            // We only want the calendar if it contains iCalendar objects.
-            var components = res.props.supportedCalendarComponentSet || [];
-            return components.reduce(function (hasObjs, component) {
-              return hasObjs || ICAL_OBJS.has(component);
-            }, false);
-          }).map(function (res) {
-            debug("Found calendar ".concat(res.props.displayname, ",\n             props: ").concat(JSON.stringify(res.props)));
-            return new _model.Calendar({
-              data: res,
-              account: account,
-              description: res.props.calendarDescription,
-              timezone: res.props.calendarTimezone,
-              url: _url["default"].resolve(account.rootUrl, res.href),
-              ctag: res.props.getctag,
-              displayName: res.props.displayname,
-              components: res.props.supportedCalendarComponentSet,
-              resourcetype: res.props.resourcetype,
-              syncToken: res.props.syncToken
-            });
-          });
-          _context2.next = 9;
-          return cals.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(cal) {
-            return regeneratorRuntime.wrap(function _callee$(_context) {
-              while (1) {
-                switch (_context.prev = _context.next) {
-                  case 0:
-                    _context.next = 2;
-                    return webdav.supportedReportSet(cal, options);
-
-                  case 2:
-                    cal.reports = _context.sent;
-
-                  case 3:
-                  case "end":
-                    return _context.stop();
-                }
-              }
-            }, _callee);
-          })));
-
-        case 9:
-          return _context2.abrupt("return", cals);
-
-        case 10:
-        case "end":
-          return _context2.stop();
-      }
-    }
-  }, _callee2);
-}));
-/**
- * @param {dav.Calendar} calendar the calendar to put the object on.
- * @return {Promise} promise will resolve when the calendar has been created.
- *
- * Options:
- *
- *   (String) data - rfc 5545 VCALENDAR object.
- *   (String) filename - name for the calendar ics file.
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-exports.listCalendars = listCalendars;
-
-function createCalendarObject(calendar, options) {
-  var objectUrl = _url["default"].resolve(calendar.url, options.filename);
-
-  options.contentType = options.contentType || "text/calendar; charset=utf-8";
-  return webdav.createObject(objectUrl, options.data, options);
-}
-
-;
-/**
- * @param {dav.CalendarObject} calendarObject updated calendar object.
- * @return {Promise} promise will resolve when the calendar has been updated.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-function updateCalendarObject(calendarObject, options) {
-  options.contentType = options.contentType || "text/calendar; charset=utf-8";
-  return webdav.updateObject(calendarObject.url, calendarObject.calendarData, calendarObject.etag, options);
-}
-/**
- * @param {dav.CalendarObject} calendarObject target calendar object.
- * @return {Promise} promise will resolve when the calendar has been deleted.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-function deleteCalendarObject(calendarObject, options) {
-  return webdav.deleteObject(calendarObject.url, calendarObject.etag, options);
-}
-/**
- * @param {dav.Calendar} calendar the calendar to fetch objects for.
- *
- * Options:
- *
- *   (Array.<Object>) filters - optional caldav filters.
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-var listCalendarObjects = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(calendar, options) {
-  var filters, req, responses;
-  return regeneratorRuntime.wrap(function _callee3$(_context3) {
-    while (1) {
-      switch (_context3.prev = _context3.next) {
-        case 0:
-          debug("Doing REPORT on calendar ".concat(calendar.url, " which belongs to\n         ").concat(calendar.account.credentials.username));
-          filters = options.filters || [{
-            type: 'comp-filter',
-            attrs: {
-              name: 'VCALENDAR'
-            },
-            children: [{
-              type: 'comp-filter',
-              attrs: {
-                name: 'VEVENT'
-              }
-            }]
-          }];
-          req = request.calendarQuery({
-            depth: 1,
-            props: [{
-              name: 'getetag',
-              namespace: ns.DAV
-            }, {
-              name: 'calendar-data',
-              namespace: ns.CALDAV
-            }],
-            filters: filters
-          });
-          _context3.next = 5;
-          return options.xhr.send(req, calendar.url, {
-            sandbox: options.sandbox
-          });
-
-        case 5:
-          responses = _context3.sent;
-          return _context3.abrupt("return", responses.map(function (res) {
-            debug("Found calendar object with url ".concat(res.href));
-            return new _model.CalendarObject({
-              data: res,
-              calendar: calendar,
-              url: _url["default"].resolve(calendar.account.rootUrl, res.href),
-              etag: res.props.getetag,
-              calendarData: res.props.calendarData
-            });
-          }));
-
-        case 7:
-        case "end":
-          return _context3.stop();
-      }
-    }
-  }, _callee3);
-}));
-/**
- * @param {dav.Calendar} calendar the calendar to fetch updates to.
- * @return {Promise} promise will resolve with updated calendar object.
- *
- * Options:
- *
- *   (Array.<Object>) filters - list of caldav filters to send with request.
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (String) syncMethod - either 'basic' or 'webdav'. If unspecified, will
- *       try to do webdav sync and failover to basic sync if rfc 6578 is not
- *       supported by the server.
- *   (String) timezone - VTIMEZONE calendar object.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-exports.listCalendarObjects = listCalendarObjects;
-
-function syncCalendar(calendar, options) {
-  options.basicSync = basicSync;
-  options.webdavSync = webdavSync;
-  return webdav.syncCollection(calendar, options);
-}
-/**
- * @param {dav.Account} account the account to fetch updates for.
- * @return {Promise} promise will resolve with updated account.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-var syncCaldavAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(account) {
-  var options,
-      cals,
-      _args5 = arguments;
-  return regeneratorRuntime.wrap(function _callee5$(_context5) {
-    while (1) {
-      switch (_context5.prev = _context5.next) {
-        case 0:
-          options = _args5.length > 1 && _args5[1] !== undefined ? _args5[1] : {};
-          options.loadObjects = false;
-          if (!account.calendars) account.calendars = [];
-          _context5.next = 5;
-          return listCalendars(account, options);
-
-        case 5:
-          cals = _context5.sent;
-          cals.filter(function (cal) {
-            // Filter the calendars not previously seen.
-            return account.calendars.every(function (prev) {
-              return !(0, _fuzzy_url_equals["default"])(prev.url, cal.url);
-            });
-          }).forEach(function (cal) {
-            // Add them to the account's calendar list.
-            account.calendars.push(cal);
-          });
-          options.loadObjects = true;
-          _context5.next = 10;
-          return account.calendars.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(cal, index) {
-            return regeneratorRuntime.wrap(function _callee4$(_context4) {
-              while (1) {
-                switch (_context4.prev = _context4.next) {
-                  case 0:
-                    _context4.prev = 0;
-                    _context4.next = 3;
-                    return syncCalendar(cal, options);
-
-                  case 3:
-                    _context4.next = 9;
-                    break;
-
-                  case 5:
-                    _context4.prev = 5;
-                    _context4.t0 = _context4["catch"](0);
-                    debug("Sync calendar ".concat(cal.displayName, " failed with ").concat(_context4.t0));
-                    account.calendars.splice(index, 1);
-
-                  case 9:
-                  case "end":
-                    return _context4.stop();
-                }
-              }
-            }, _callee4, null, [[0, 5]]);
-          })));
-
-        case 10:
-          return _context5.abrupt("return", account);
-
-        case 11:
-        case "end":
-          return _context5.stop();
-      }
-    }
-  }, _callee5);
-}));
-
-exports.syncCaldavAccount = syncCaldavAccount;
-
-var basicSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee6(calendar, options) {
-  var sync;
-  return regeneratorRuntime.wrap(function _callee6$(_context6) {
-    while (1) {
-      switch (_context6.prev = _context6.next) {
-        case 0:
-          _context6.next = 2;
-          return webdav.isCollectionDirty(calendar, options);
-
-        case 2:
-          sync = _context6.sent;
-
-          if (sync) {
-            _context6.next = 6;
-            break;
-          }
-
-          debug('Local ctag matched remote! No need to sync :).');
-          return _context6.abrupt("return", calendar);
-
-        case 6:
-          debug('ctag changed so we need to fetch stuffs.');
-          _context6.next = 9;
-          return listCalendarObjects(calendar, options);
-
-        case 9:
-          calendar.objects = _context6.sent;
-          return _context6.abrupt("return", calendar);
-
-        case 11:
-        case "end":
-          return _context6.stop();
-      }
-    }
-  }, _callee6);
-}));
-
-var webdavSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee7(calendar, options) {
-  var req, result;
-  return regeneratorRuntime.wrap(function _callee7$(_context7) {
-    while (1) {
-      switch (_context7.prev = _context7.next) {
-        case 0:
-          req = request.syncCollection({
-            props: [{
-              name: 'getetag',
-              namespace: ns.DAV
-            }, {
-              name: 'calendar-data',
-              namespace: ns.CALDAV
-            }],
-            syncLevel: 1,
-            syncToken: calendar.syncToken
-          });
-          _context7.next = 3;
-          return options.xhr.send(req, calendar.url, {
-            sandbox: options.sandbox
-          });
-
-        case 3:
-          result = _context7.sent;
-          // TODO(gareth): Handle creations and deletions.
-          result.responses.forEach(function (response) {
-            // Find the calendar object that this response corresponds with.
-            var calendarObject = calendar.objects.filter(function (object) {
-              return (0, _fuzzy_url_equals["default"])(object.url, response.href);
-            })[0];
-
-            if (!calendarObject) {
-              return;
-            }
-
-            calendarObject.etag = response.props.getetag;
-            calendarObject.calendarData = response.props.calendarData;
-          });
-          calendar.syncToken = result.syncToken;
-          return _context7.abrupt("return", calendar);
-
-        case 7:
-        case "end":
-          return _context7.stop();
-      }
-    }
-  }, _callee7);
-}));
-
-},{"./fuzzy_url_equals":16,"./model":18,"./namespace":19,"./request":21,"./webdav":31,"co":34,"debug":35,"url":9}],13:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = camelize;
-
-/**
- * @fileoverview Camelcase something.
- */
-function camelize(str) {
-  var delimiter = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : '_';
-  var words = str.split(delimiter);
-  return [words[0]].concat(words.slice(1).map(function (word) {
-    return word.charAt(0).toUpperCase() + word.slice(1);
-  })).join('');
-}
-
-},{}],14:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.Client = void 0;
-
-var _url = _interopRequireDefault(require("url"));
-
-var accounts = _interopRequireWildcard(require("./accounts"));
-
-var calendars = _interopRequireWildcard(require("./calendars"));
-
-var contacts = _interopRequireWildcard(require("./contacts"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
-
-function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
-
-/**
- * @param {dav.Transport} xhr - request sender.
- *
- * Options:
- *
- *   (String) baseUrl - root url to resolve relative request urls with.
- */
-var Client = /*#__PURE__*/function () {
-  function Client(xhr) {
-    var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-
-    _classCallCheck(this, Client);
-
-    this.xhr = xhr;
-    Object.assign(this, options); // Expose internal modules for unit testing
-
-    this._accounts = accounts;
-    this._calendars = calendars;
-    this._contacts = contacts;
-  }
-  /**
-   * @param {dav.Request} req - dav request.
-   * @param {String} uri - where to send request.
-   * @return {Promise} a promise that will be resolved with an xhr request
-   *     after its readyState is 4 or the result of applying an optional
-   *     request `transformResponse` function to the xhr object after its
-   *     readyState is 4.
-   *
-   * Options:
-   *
-   *   (Object) sandbox - optional request sandbox.
-   */
-
-
-  _createClass(Client, [{
-    key: "send",
-    value: function send(req, uri, options) {
-      if (this.baseUrl) {
-        var urlObj = _url["default"].parse(uri);
-
-        uri = _url["default"].resolve(this.baseUrl, urlObj.path);
-      }
-
-      return this.xhr.send(req, uri, options);
-    }
-  }, {
-    key: "createAccount",
-    value: function createAccount() {
-      var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-      options.xhr = options.xhr || this.xhr;
-      return accounts.createAccount(options);
-    }
-  }, {
-    key: "createCalendarObject",
-    value: function createCalendarObject(calendar) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return calendars.createCalendarObject(calendar, options);
-    }
-  }, {
-    key: "updateCalendarObject",
-    value: function updateCalendarObject(calendarObject) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return calendars.updateCalendarObject(calendarObject, options);
-    }
-  }, {
-    key: "deleteCalendarObject",
-    value: function deleteCalendarObject(calendarObject) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return calendars.deleteCalendarObject(calendarObject, options);
-    }
-  }, {
-    key: "syncCalendar",
-    value: function syncCalendar(calendar) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return calendars.syncCalendar(calendar, options);
-    }
-  }, {
-    key: "syncCaldavAccount",
-    value: function syncCaldavAccount(account) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return calendars.syncCaldavAccount(account, options);
-    }
-  }, {
-    key: "createCard",
-    value: function createCard(addressBook) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return contacts.createCard(addressBook, options);
-    }
-  }, {
-    key: "updateCard",
-    value: function updateCard(card) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return contacts.updateCard(card, options);
-    }
-  }, {
-    key: "deleteCard",
-    value: function deleteCard(card) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return contacts.deleteCard(card, options);
-    }
-  }, {
-    key: "syncAddressBook",
-    value: function syncAddressBook(addressBook) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return contacts.syncAddressBook(addressBook, options);
-    }
-  }, {
-    key: "syncCarddavAccount",
-    value: function syncCarddavAccount(account) {
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-      options.xhr = options.xhr || this.xhr;
-      return contacts.syncCarddavAccount(account, options);
-    }
-  }]);
-
-  return Client;
-}();
-
-exports.Client = Client;
-
-},{"./accounts":11,"./calendars":12,"./contacts":15,"url":9}],15:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.createCard = createCard;
-exports.updateCard = updateCard;
-exports.deleteCard = deleteCard;
-exports.syncAddressBook = syncAddressBook;
-exports.syncCarddavAccount = exports.listVCards = exports.listAddressBooks = void 0;
-
-var _co = _interopRequireDefault(require("co"));
-
-var _url = _interopRequireDefault(require("url"));
-
-var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
-
-var _model = require("./model");
-
-var ns = _interopRequireWildcard(require("./namespace"));
-
-var request = _interopRequireWildcard(require("./request"));
-
-var webdav = _interopRequireWildcard(require("./webdav"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-var debug = require('debug')('dav:contacts');
-/**
- * @param {dav.Account} account to fetch address books for.
- */
-
-
-var listAddressBooks = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(account, options) {
-  var req, responses, addressBooks;
-  return regeneratorRuntime.wrap(function _callee2$(_context2) {
-    while (1) {
-      switch (_context2.prev = _context2.next) {
-        case 0:
-          debug("Fetch address books from home url ".concat(account.homeUrl));
-          req = request.propfind({
-            props: [{
-              name: 'displayname',
-              namespace: ns.DAV
-            }, {
-              name: 'getctag',
-              namespace: ns.CALENDAR_SERVER
-            }, {
-              name: 'resourcetype',
-              namespace: ns.DAV
-            }, {
-              name: 'sync-token',
-              namespace: ns.DAV
-            }],
-            depth: 1
-          });
-          _context2.next = 4;
-          return options.xhr.send(req, account.homeUrl, {
-            sandbox: options.sandbox
-          });
-
-        case 4:
-          responses = _context2.sent;
-          addressBooks = responses.filter(function (res) {
-            return typeof res.props.displayname === 'string';
-          }).map(function (res) {
-            debug("Found address book named ".concat(res.props.displayname, ",\n             props: ").concat(JSON.stringify(res.props)));
-            return new _model.AddressBook({
-              data: res,
-              account: account,
-              url: _url["default"].resolve(account.rootUrl, res.href),
-              ctag: res.props.getctag,
-              displayName: res.props.displayname,
-              resourcetype: res.props.resourcetype,
-              syncToken: res.props.syncToken
-            });
-          });
-          _context2.next = 8;
-          return addressBooks.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(addressBook) {
-            return regeneratorRuntime.wrap(function _callee$(_context) {
-              while (1) {
-                switch (_context.prev = _context.next) {
-                  case 0:
-                    _context.next = 2;
-                    return webdav.supportedReportSet(addressBook, options);
-
-                  case 2:
-                    addressBook.reports = _context.sent;
-
-                  case 3:
-                  case "end":
-                    return _context.stop();
-                }
-              }
-            }, _callee);
-          })));
-
-        case 8:
-          return _context2.abrupt("return", addressBooks);
-
-        case 9:
-        case "end":
-          return _context2.stop();
-      }
-    }
-  }, _callee2);
-}));
-/**
- * @param {dav.AddressBook} addressBook the address book to put the object on.
- * @return {Promise} promise will resolve when the card has been created.
- *
- * Options:
- *
- *   (String) data - vcard object.
- *   (String) filename - name for the address book vcf file.
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-exports.listAddressBooks = listAddressBooks;
-
-function createCard(addressBook, options) {
-  var objectUrl = _url["default"].resolve(addressBook.url, options.filename);
-
-  return webdav.createObject(objectUrl, options.data, options);
-}
-/**
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- */
-
-
-var listVCards = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(addressBook, options) {
-  var req, responses;
-  return regeneratorRuntime.wrap(function _callee3$(_context3) {
-    while (1) {
-      switch (_context3.prev = _context3.next) {
-        case 0:
-          debug("Doing REPORT on address book ".concat(addressBook.url, " which belongs to\n        ").concat(addressBook.account.credentials.username));
-          req = request.addressBookQuery({
-            depth: 1,
-            props: [{
-              name: 'getetag',
-              namespace: ns.DAV
-            }, {
-              name: 'address-data',
-              namespace: ns.CARDDAV
-            }]
-          });
-          _context3.next = 4;
-          return options.xhr.send(req, addressBook.url, {
-            sandbox: options.sandbox
-          });
-
-        case 4:
-          responses = _context3.sent;
-          return _context3.abrupt("return", responses.map(function (res) {
-            debug("Found vcard with url ".concat(res.href));
-            return new _model.VCard({
-              data: res,
-              addressBook: addressBook,
-              url: _url["default"].resolve(addressBook.account.rootUrl, res.href),
-              etag: res.props.getetag,
-              addressData: res.props.addressData
-            });
-          }));
-
-        case 6:
-        case "end":
-          return _context3.stop();
-      }
-    }
-  }, _callee3);
-}));
-/**
- * @param {dav.VCard} card updated vcard object.
- * @return {Promise} promise will resolve when the card has been updated.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-exports.listVCards = listVCards;
-
-function updateCard(card, options) {
-  return webdav.updateObject(card.url, card.addressData, card.etag, options);
-}
-/**
- * @param {dav.VCard} card target vcard object.
- * @return {Promise} promise will resolve when the calendar has been deleted.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-function deleteCard(card, options) {
-  return webdav.deleteObject(card.url, card.etag, options);
-}
-/**
- * @param {dav.Calendar} calendar the calendar to fetch updates to.
- * @return {Promise} promise will resolve with updated calendar object.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (String) syncMethod - either 'basic' or 'webdav'. If unspecified, will
- *       try to do webdav sync and failover to basic sync if rfc 6578 is not
- *       supported by the server.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-function syncAddressBook(addressBook, options) {
-  options.basicSync = basicSync;
-  options.webdavSync = webdavSync;
-  return webdav.syncCollection(addressBook, options);
-}
-/**
- * @param {dav.Account} account the account to fetch updates for.
- * @return {Promise} promise will resolve with updated account.
- *
- * Options:
- *
- *   (dav.Sandbox) sandbox - optional request sandbox.
- *   (dav.Transport) xhr - request sender.
- */
-
-
-var syncCarddavAccount = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee5(account) {
-  var options,
-      addressBooks,
-      _args5 = arguments;
-  return regeneratorRuntime.wrap(function _callee5$(_context5) {
-    while (1) {
-      switch (_context5.prev = _context5.next) {
-        case 0:
-          options = _args5.length > 1 && _args5[1] !== undefined ? _args5[1] : {};
-          options.loadObjects = false;
-
-          if (!account.addressBooks) {
-            account.addressBooks = [];
-          }
-
-          _context5.next = 5;
-          return listAddressBooks(account, options);
-
-        case 5:
-          addressBooks = _context5.sent;
-          addressBooks.filter(function (addressBook) {
-            // Filter the address books not previously seen.
-            return account.addressBooks.every(function (prev) {
-              return !(0, _fuzzy_url_equals["default"])(prev.url, addressBook.url);
-            });
-          }).forEach(function (addressBook) {
-            return account.addressBooks.push(addressBook);
-          });
-          options.loadObjects = true;
-          _context5.next = 10;
-          return account.addressBooks.map(_co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(addressBook, index) {
-            return regeneratorRuntime.wrap(function _callee4$(_context4) {
-              while (1) {
-                switch (_context4.prev = _context4.next) {
-                  case 0:
-                    _context4.prev = 0;
-                    _context4.next = 3;
-                    return syncAddressBook(addressBook, options);
-
-                  case 3:
-                    _context4.next = 9;
-                    break;
-
-                  case 5:
-                    _context4.prev = 5;
-                    _context4.t0 = _context4["catch"](0);
-                    debug("Syncing ".concat(addressBook.displayName, " failed with ").concat(_context4.t0));
-                    account.addressBooks.splice(index, 1);
-
-                  case 9:
-                  case "end":
-                    return _context4.stop();
-                }
-              }
-            }, _callee4, null, [[0, 5]]);
-          })));
-
-        case 10:
-          return _context5.abrupt("return", account);
-
-        case 11:
-        case "end":
-          return _context5.stop();
-      }
-    }
-  }, _callee5);
-}));
-
-exports.syncCarddavAccount = syncCarddavAccount;
-
-var basicSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee6(addressBook, options) {
-  var sync;
-  return regeneratorRuntime.wrap(function _callee6$(_context6) {
-    while (1) {
-      switch (_context6.prev = _context6.next) {
-        case 0:
-          sync = webdav.isCollectionDirty(addressBook, options);
-
-          if (sync) {
-            _context6.next = 4;
-            break;
-          }
-
-          debug('Local ctag matched remote! No need to sync :).');
-          return _context6.abrupt("return", addressBook);
-
-        case 4:
-          debug('ctag changed so we need to fetch stuffs.');
-          _context6.next = 7;
-          return listVCards(addressBook, options);
-
-        case 7:
-          addressBook.objects = _context6.sent;
-          return _context6.abrupt("return", addressBook);
-
-        case 9:
-        case "end":
-          return _context6.stop();
-      }
-    }
-  }, _callee6);
-}));
-
-var webdavSync = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee7(addressBook, options) {
-  var req, result;
-  return regeneratorRuntime.wrap(function _callee7$(_context7) {
-    while (1) {
-      switch (_context7.prev = _context7.next) {
-        case 0:
-          req = request.syncCollection({
-            props: [{
-              name: 'getetag',
-              namespace: ns.DAV
-            }, {
-              name: 'address-data',
-              namespace: ns.CARDDAV
-            }],
-            syncLevel: 1,
-            syncToken: addressBook.syncToken
-          });
-          _context7.next = 3;
-          return options.xhr.send(req, addressBook.url, {
-            sandbox: options.sandbox
-          });
-
-        case 3:
-          result = _context7.sent;
-          // TODO(gareth): Handle creations and deletions.
-          result.responses.forEach(function (response) {
-            // Find the vcard that this response corresponds with.
-            var vcard = addressBook.objects.filter(function (object) {
-              return (0, _fuzzy_url_equals["default"])(object.url, response.href);
-            })[0];
-            if (!vcard) return;
-            vcard.etag = response.props.getetag;
-            vcard.addressData = response.props.addressData;
-          });
-          addressBook.syncToken = result.syncToken;
-          return _context7.abrupt("return", addressBook);
-
-        case 7:
-        case "end":
-          return _context7.stop();
-      }
-    }
-  }, _callee7);
-}));
-
-},{"./fuzzy_url_equals":16,"./model":18,"./namespace":19,"./request":21,"./webdav":31,"co":34,"debug":35,"url":9}],16:[function(require,module,exports){
-'use strict';
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = fuzzyUrlEquals;
-
-function fuzzyUrlEquals(one, other) {
-  return fuzzyIncludes(one, other) || fuzzyIncludes(other, one);
-}
-
-;
-
-function fuzzyIncludes(one, other) {
-  return one.indexOf(other) !== -1 || other.charAt(other.length - 1) === '/' && one.indexOf(other.slice(0, -1)) !== -1;
-}
-
-},{}],17:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-var _exportNames = {
-  debug: true,
-  ns: true,
-  Request: true,
-  request: true,
-  transport: true,
-  version: true,
-  createAccount: true,
-  Client: true,
-  Sandbox: true,
-  createSandbox: true
-};
-Object.defineProperty(exports, "Request", {
-  enumerable: true,
-  get: function get() {
-    return request.Request;
-  }
-});
-Object.defineProperty(exports, "version", {
-  enumerable: true,
-  get: function get() {
-    return _package.version;
-  }
-});
-Object.defineProperty(exports, "createAccount", {
-  enumerable: true,
-  get: function get() {
-    return _accounts.createAccount;
-  }
-});
-Object.defineProperty(exports, "Client", {
-  enumerable: true,
-  get: function get() {
-    return _client.Client;
-  }
-});
-Object.defineProperty(exports, "Sandbox", {
-  enumerable: true,
-  get: function get() {
-    return _sandbox.Sandbox;
-  }
-});
-Object.defineProperty(exports, "createSandbox", {
-  enumerable: true,
-  get: function get() {
-    return _sandbox.createSandbox;
-  }
-});
-exports.transport = exports.request = exports.ns = exports.debug = void 0;
-
-var ns = _interopRequireWildcard(require("./namespace"));
-
-exports.ns = ns;
-
-var request = _interopRequireWildcard(require("./request"));
-
-exports.request = request;
-
-var transport = _interopRequireWildcard(require("./transport"));
-
-exports.transport = transport;
-
-var _package = require("../package");
-
-var _accounts = require("./accounts");
-
-var _calendars = require("./calendars");
-
-Object.keys(_calendars).forEach(function (key) {
-  if (key === "default" || key === "__esModule") return;
-  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
-  if (key in exports && exports[key] === _calendars[key]) return;
-  Object.defineProperty(exports, key, {
-    enumerable: true,
-    get: function get() {
-      return _calendars[key];
-    }
-  });
-});
-
-var _client = require("./client");
-
-var _contacts = require("./contacts");
-
-Object.keys(_contacts).forEach(function (key) {
-  if (key === "default" || key === "__esModule") return;
-  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
-  if (key in exports && exports[key] === _contacts[key]) return;
-  Object.defineProperty(exports, key, {
-    enumerable: true,
-    get: function get() {
-      return _contacts[key];
-    }
-  });
-});
-
-var _model = require("./model");
-
-Object.keys(_model).forEach(function (key) {
-  if (key === "default" || key === "__esModule") return;
-  if (Object.prototype.hasOwnProperty.call(_exportNames, key)) return;
-  if (key in exports && exports[key] === _model[key]) return;
-  Object.defineProperty(exports, key, {
-    enumerable: true,
-    get: function get() {
-      return _model[key];
-    }
-  });
-});
-
-var _sandbox = require("./sandbox");
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-var debug = require('debug')('dav');
-
-exports.debug = debug;
-
-},{"../package":42,"./accounts":11,"./calendars":12,"./client":14,"./contacts":15,"./model":18,"./namespace":19,"./request":21,"./sandbox":22,"./transport":30,"debug":35}],18:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.VCard = exports.CalendarObject = exports.DAVObject = exports.Calendar = exports.AddressBook = exports.DAVCollection = exports.Credentials = exports.Account = void 0;
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function"); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, writable: true, configurable: true } }); if (superClass) _setPrototypeOf(subClass, superClass); }
-
-function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) { o.__proto__ = p; return o; }; return _setPrototypeOf(o, p); }
-
-function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = _getPrototypeOf(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
-
-function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) === "object" || typeof call === "function")) { return call; } return _assertThisInitialized(self); }
-
-function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
-
-function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
-
-function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-var Account = function Account(options) {
-  _classCallCheck(this, Account);
-
-  Object.assign(this, {
-    server: null,
-    credentials: null,
-    rootUrl: null,
-    principalUrl: null,
-    homeUrl: null,
-    calendars: null,
-    addressBooks: null
-  }, options);
-};
-/**
- * Options:
- *   (String) username - username (perhaps email) for calendar user.
- *   (String) password - plaintext password for calendar user.
- *   (String) clientId - oauth client id.
- *   (String) clientSecret - oauth client secret.
- *   (String) authorizationCode - oauth code.
- *   (String) redirectUrl - oauth redirect url.
- *   (String) tokenUrl - oauth token url.
- *   (String) accessToken - oauth access token.
- *   (String) refreshToken - oauth refresh token.
- *   (Number) expiration - unix time for access token expiration.
- */
-
-
-exports.Account = Account;
-
-var Credentials = function Credentials(options) {
-  _classCallCheck(this, Credentials);
-
-  Object.assign(this, {
-    username: null,
-    password: null,
-    clientId: null,
-    clientSecret: null,
-    authorizationCode: null,
-    redirectUrl: null,
-    tokenUrl: null,
-    accessToken: null,
-    refreshToken: null,
-    expiration: null
-  }, options);
-};
-
-exports.Credentials = Credentials;
-
-var DAVCollection = function DAVCollection(options) {
-  _classCallCheck(this, DAVCollection);
-
-  Object.assign(this, {
-    data: null,
-    objects: null,
-    account: null,
-    ctag: null,
-    description: null,
-    displayName: null,
-    reports: null,
-    resourcetype: null,
-    syncToken: null,
-    url: null
-  }, options);
-};
-
-exports.DAVCollection = DAVCollection;
-
-var AddressBook = /*#__PURE__*/function (_DAVCollection) {
-  _inherits(AddressBook, _DAVCollection);
-
-  var _super = _createSuper(AddressBook);
-
-  function AddressBook(options) {
-    _classCallCheck(this, AddressBook);
-
-    return _super.call(this, options);
-  }
-
-  return AddressBook;
-}(DAVCollection);
-
-exports.AddressBook = AddressBook;
-
-var Calendar = /*#__PURE__*/function (_DAVCollection2) {
-  _inherits(Calendar, _DAVCollection2);
-
-  var _super2 = _createSuper(Calendar);
-
-  function Calendar(options) {
-    var _this;
-
-    _classCallCheck(this, Calendar);
-
-    _this = _super2.call(this, options);
-    Object.assign(_assertThisInitialized(_this), {
-      components: null,
-      timezone: null
-    }, options);
-    return _this;
-  }
-
-  return Calendar;
-}(DAVCollection);
-
-exports.Calendar = Calendar;
-
-var DAVObject = function DAVObject(options) {
-  _classCallCheck(this, DAVObject);
-
-  Object.assign(this, {
-    data: null,
-    etag: null,
-    url: null
-  }, options);
-};
-
-exports.DAVObject = DAVObject;
-
-var CalendarObject = /*#__PURE__*/function (_DAVObject) {
-  _inherits(CalendarObject, _DAVObject);
-
-  var _super3 = _createSuper(CalendarObject);
-
-  function CalendarObject(options) {
-    var _this2;
-
-    _classCallCheck(this, CalendarObject);
-
-    _this2 = _super3.call(this, options);
-    Object.assign(_assertThisInitialized(_this2), {
-      calendar: null,
-      calendarData: null
-    }, options);
-    return _this2;
-  }
-
-  return CalendarObject;
-}(DAVObject);
-
-exports.CalendarObject = CalendarObject;
-
-var VCard = /*#__PURE__*/function (_DAVObject2) {
-  _inherits(VCard, _DAVObject2);
-
-  var _super4 = _createSuper(VCard);
-
-  function VCard(options) {
-    var _this3;
-
-    _classCallCheck(this, VCard);
-
-    _this3 = _super4.call(this, options);
-    Object.assign(_assertThisInitialized(_this3), {
-      addressBook: null,
-      addressData: null
-    }, options);
-    return _this3;
-  }
-
-  return VCard;
-}(DAVObject);
-
-exports.VCard = VCard;
-
-},{}],19:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.DAV = exports.CARDDAV = exports.CALDAV = exports.CALDAV_APPLE = exports.CALENDAR_SERVER = void 0;
-var CALENDAR_SERVER = 'http://calendarserver.org/ns/';
-exports.CALENDAR_SERVER = CALENDAR_SERVER;
-var CALDAV_APPLE = 'http://apple.com/ns/ical/';
-exports.CALDAV_APPLE = CALDAV_APPLE;
-var CALDAV = 'urn:ietf:params:xml:ns:caldav';
-exports.CALDAV = CALDAV;
-var CARDDAV = 'urn:ietf:params:xml:ns:carddav';
-exports.CARDDAV = CARDDAV;
-var DAV = 'DAV:';
-exports.DAV = DAV;
-
-},{}],20:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.multistatus = multistatus;
-
-var _camelize = _interopRequireDefault(require("./camelize"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-var debug = require('debug')('dav:parser');
-
-var DOMParser;
-
-if (typeof self !== 'undefined' && 'DOMParser' in self) {
-  // browser main thread
-  DOMParser = self.DOMParser;
-} else {
-  // nodejs or web worker
-  DOMParser = require('xmldom').DOMParser;
-}
-
-function multistatus(string) {
-  var parser = new DOMParser();
-  var doc = parser.parseFromString(string, 'text/xml');
-  var result = traverse.multistatus(child(doc, 'multistatus'));
-  debug("input:\n".concat(string, "\noutput:\n").concat(JSON.stringify(result), "\n"));
-  return result;
-}
-
-var traverse = {
-  // { response: [x, y, z] }
-  multistatus: function multistatus(node) {
-    return complex(node, {
-      response: true
-    });
-  },
-  // { propstat: [x, y, z] }
-  response: function response(node) {
-    return complex(node, {
-      propstat: true,
-      href: false
-    });
-  },
-  // { prop: x }
-  propstat: function propstat(node) {
-    return complex(node, {
-      prop: false
-    });
-  },
-  // {
-  //   resourcetype: x
-  //   supportedCalendarComponentSet: y,
-  //   supportedReportSet: z
-  // }
-  prop: function prop(node) {
-    return complex(node, {
-      resourcetype: false,
-      supportedCalendarComponentSet: false,
-      supportedReportSet: false,
-      currentUserPrincipal: false
-    });
-  },
-  resourcetype: function resourcetype(node) {
-    return childNodes(node).map(function (childNode) {
-      return childNode.localName;
-    });
-  },
-  // [x, y, z]
-  supportedCalendarComponentSet: function supportedCalendarComponentSet(node) {
-    return complex(node, {
-      comp: true
-    }, 'comp');
-  },
-  // [x, y, z]
-  supportedReportSet: function supportedReportSet(node) {
-    return complex(node, {
-      supportedReport: true
-    }, 'supportedReport');
-  },
-  comp: function comp(node) {
-    return node.getAttribute('name');
-  },
-  // x
-  supportedReport: function supportedReport(node) {
-    return complex(node, {
-      report: false
-    }, 'report');
-  },
-  report: function report(node) {
-    return childNodes(node).map(function (childNode) {
-      return childNode.localName;
-    });
-  },
-  href: function href(node) {
-    return decodeURIComponent(childNodes(node)[0].nodeValue);
-  },
-  currentUserPrincipal: function currentUserPrincipal(node) {
-    return complex(node, {
-      href: false
-    }, 'href');
-  }
-};
-
-function complex(node, childspec, collapse) {
-  var result = {};
-
-  for (var key in childspec) {
-    if (childspec[key]) {
-      // Create array since we're expecting multiple.
-      result[key] = [];
-    }
-  }
-
-  childNodes(node).forEach(function (childNode) {
-    return traverseChild(node, childNode, childspec, result);
-  });
-  return maybeCollapse(result, childspec, collapse);
-}
-/**
- * Parse child childNode of node with childspec and write outcome to result.
- */
-
-
-function traverseChild(node, childNode, childspec, result) {
-  if (childNode.nodeType === 3 && /^\s+$/.test(childNode.nodeValue)) {
-    // Whitespace... nothing to do.
-    return;
-  }
-
-  var localName = (0, _camelize["default"])(childNode.localName, '-');
-
-  if (!(localName in childspec)) {
-    debug('Unexpected node of type ' + localName + ' encountered while ' + 'parsing ' + node.localName + ' node!');
-    var value = childNode.textContent;
-
-    if (localName in result) {
-      if (!Array.isArray(result[localName])) {
-        // Since we've already encountered this node type and we haven't yet
-        // made an array for it, make an array now.
-        result[localName] = [result[localName]];
-      }
-
-      result[localName].push(value);
-      return;
-    } // First time we're encountering this node.
-
-
-    result[localName] = value;
-    return;
-  }
-
-  var traversal = traverse[localName](childNode);
-
-  if (childspec[localName]) {
-    // Expect multiple.
-    result[localName].push(traversal);
-  } else {
-    // Expect single.
-    result[localName] = traversal;
-  }
-}
-
-function maybeCollapse(result, childspec, collapse) {
-  if (!collapse) {
-    return result;
-  }
-
-  if (!childspec[collapse]) {
-    return result[collapse];
-  } // Collapse array.
-
-
-  return result[collapse].reduce(function (a, b) {
-    return a.concat(b);
-  }, []);
-}
-
-function childNodes(node) {
-  var result = node.childNodes;
-
-  if (!Array.isArray(result)) {
-    result = Array.prototype.slice.call(result);
-  }
-
-  return result;
-}
-
-function children(node, localName) {
-  return childNodes(node).filter(function (childNode) {
-    return childNode.localName === localName;
-  });
-}
-
-function child(node, localName) {
-  return children(node, localName)[0];
-}
-
-},{"./camelize":13,"debug":35,"xmldom":38}],21:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.addressBookQuery = addressBookQuery;
-exports.basic = basic;
-exports.calendarQuery = calendarQuery;
-exports.collectionQuery = collectionQuery;
-exports.propfind = propfind;
-exports.syncCollection = syncCollection;
-exports.mergeProps = mergeProps;
-exports.getProps = getProps;
-exports.setRequestHeaders = setRequestHeaders;
-exports.Request = void 0;
-
-var _parser = require("./parser");
-
-var template = _interopRequireWildcard(require("./template/index"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-/**
- * Options:
- *
- *   (String) depth - optional value for Depth header.
- *   (Array.<Object>) props - list of props to request.
- */
-function addressBookQuery(options) {
-  return collectionQuery(template.addressBookQuery({
-    props: options.props || []
-  }), {
-    depth: options.depth
-  });
-}
-/**
- * Options:
- *
- *   (String) data - put request body.
- *   (String) method - http method.
- *   (String) etag - cached calendar object etag.
- */
-
-
-function basic(options) {
-  function transformRequest(xhr) {
-    setRequestHeaders(xhr, options);
-  }
-
-  return new Request({
-    method: options.method,
-    requestData: options.data,
-    transformRequest: transformRequest
-  });
-}
-/**
- * Options:
- *
- *   (String) depth - optional value for Depth header.
- *   (Array.<Object>) filters - list of filters to send with request.
- *   (Array.<Object>) props - list of props to request.
- *   (String) timezone - VTIMEZONE calendar object.
- */
-
-
-function calendarQuery(options) {
-  return collectionQuery(template.calendarQuery({
-    props: options.props || [],
-    filters: options.filters || [],
-    timezone: options.timezone
-  }), {
-    depth: options.depth
-  });
-}
-
-function collectionQuery(requestData, options) {
-  function transformRequest(xhr) {
-    setRequestHeaders(xhr, options);
-  }
-
-  function transformResponse(xhr) {
-    return (0, _parser.multistatus)(xhr.responseText).response.map(function (res) {
-      return {
-        href: res.href,
-        props: getProps(res.propstat)
-      };
-    });
-  }
-
-  return new Request({
-    method: 'REPORT',
-    requestData: requestData,
-    transformRequest: transformRequest,
-    transformResponse: transformResponse
-  });
-}
-/**
- * Options:
- *
- *   (String) depth - optional value for Depth header.
- *   (Array.<Object>) props - list of props to request.
- */
-
-
-function propfind(options) {
-  var requestData = template.propfind({
-    props: options.props
-  });
-
-  function transformRequest(xhr) {
-    setRequestHeaders(xhr, options);
-  }
-
-  function transformResponse(xhr) {
-    var responses = (0, _parser.multistatus)(xhr.responseText).response.map(function (res) {
-      return {
-        href: res.href,
-        props: getProps(res.propstat)
-      };
-    });
-
-    if (!options.mergeResponses) {
-      return responses;
-    } // Merge the props.
-
-
-    var merged = mergeProps(responses.map(function (res) {
-      return res.props;
-    }));
-    var hrefs = responses.map(function (res) {
-      return res.href;
-    });
-    return {
-      props: merged,
-      hrefs: hrefs
-    };
-  }
-
-  return new Request({
-    method: 'PROPFIND',
-    requestData: requestData,
-    transformRequest: transformRequest,
-    transformResponse: transformResponse
-  });
-}
-/**
- * Options:
- *
- *   (String) depth - option value for Depth header.
- *   (Array.<Object>) props - list of props to request.
- *   (Number) syncLevel - indicates scope of the sync report request.
- *   (String) syncToken - synchronization token provided by the server.
- */
-
-
-function syncCollection(options) {
-  var requestData = template.syncCollection({
-    props: options.props,
-    syncLevel: options.syncLevel,
-    syncToken: options.syncToken
-  });
-
-  function transformRequest(xhr) {
-    setRequestHeaders(xhr, options);
-  }
-
-  function transformResponse(xhr) {
-    var object = (0, _parser.multistatus)(xhr.responseText);
-    var responses = object.response.map(function (res) {
-      return {
-        href: res.href,
-        props: getProps(res.propstat)
-      };
-    });
-    return {
-      responses: responses,
-      syncToken: object.syncToken
-    };
-  }
-
-  return new Request({
-    method: 'REPORT',
-    requestData: requestData,
-    transformRequest: transformRequest,
-    transformResponse: transformResponse
-  });
-}
-
-var Request = function Request() {
-  var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-
-  _classCallCheck(this, Request);
-
-  Object.assign(this, {
-    method: null,
-    requestData: null,
-    transformRequest: null,
-    transformResponse: null,
-    onerror: null
-  }, options);
-};
-
-exports.Request = Request;
-
-function getProp(propstat) {
-  if (/404/g.test(propstat.status)) {
-    return null;
-  }
-
-  if (/5\d{2}/g.test(propstat.status) || /4\d{2}/g.test(propstat.status)) {
-    throw new Error('Bad status on propstat: ' + propstat.status);
-  }
-
-  return 'prop' in propstat ? propstat.prop : null;
-}
-
-function mergeProps(props) {
-  return props.reduce(function (a, b) {
-    return Object.assign(a, b);
-  }, {});
-}
-/**
- * Map propstats to props.
- */
-
-
-function getProps(propstats) {
-  return mergeProps(propstats.map(getProp).filter(function (prop) {
-    return prop && _typeof(prop) === 'object';
-  }));
-}
-
-function setRequestHeaders(request, options) {
-  request.setRequestHeader('Content-Type', options.contentType || 'application/xml;charset=utf-8');
-
-  if (options.depth !== undefined) {
-    request.setRequestHeader('Depth', options.depth);
-  }
-
-  if (options.etag !== undefined) {
-    request.setRequestHeader('If-Match', options.etag);
-  }
-}
-
-},{"./parser":20,"./template/index":26}],22:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.createSandbox = createSandbox;
-exports.Sandbox = void 0;
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
-
-function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
-
-/**
- * @fileoverview Group requests together and then abort as a group.
- *
- * var sandbox = new dav.Sandbox();
- * return Promise.all([
- *   dav.createEvent(event, { sandbox: sandbox }),
- *   dav.deleteEvent(other, { sandbox: sandbox })
- * ])
- * .catch(function() {
- *   // Something went wrong so abort all requests.
- *   sandbox.abort;
- * });
- */
-var debug = require('debug')('dav:sandbox');
-
-var Sandbox = /*#__PURE__*/function () {
-  function Sandbox() {
-    _classCallCheck(this, Sandbox);
-
-    this.requestList = [];
-  }
-
-  _createClass(Sandbox, [{
-    key: "add",
-    value: function add(request) {
-      debug('Adding request to sandbox.');
-      this.requestList.push(request);
-    }
-  }, {
-    key: "abort",
-    value: function abort() {
-      debug('Aborting sandboxed requests.');
-      this.requestList.forEach(function (request) {
-        return request.abort();
-      });
-    }
-  }]);
-
-  return Sandbox;
-}();
-
-exports.Sandbox = Sandbox;
-
-function createSandbox() {
-  return new Sandbox();
-}
-
-},{"debug":35}],23:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = addressBookQuery;
-
-var _prop = _interopRequireDefault(require("./prop"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function addressBookQuery(object) {
-  return "<card:addressbook-query xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n                          xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n    <!-- According to http://stackoverflow.com/questions/23742568/google-carddav-api-addressbook-multiget-returns-400-bad-request,\n         Google's CardDAV server requires a filter element. I don't think all addressbook-query calls need a filter in the spec though? -->\n    <card:filter>\n      <card:prop-filter name=\"FN\">\n      </card:prop-filter>\n    </card:filter>\n  </card:addressbook-query>");
-}
-
-},{"./prop":27}],24:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = calendarQuery;
-
-var _filter = _interopRequireDefault(require("./filter"));
-
-var _prop = _interopRequireDefault(require("./prop"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function calendarQuery(object) {
-  return "<c:calendar-query xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n                    xmlns:cs=\"http://calendarserver.org/ns/\"\n                    xmlns:ca=\"http://apple.com/ns/ical/\"\n                    xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n    <c:filter>\n      ").concat(object.filters.map(_filter["default"]), "\n    </c:filter>\n    ").concat(object.timezone ? '<c:timezone>' + object.timezone + '</c:timezone>' : '', "\n  </c:calendar-query>");
-}
-
-},{"./filter":25,"./prop":27}],25:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = filter;
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-function filter(item) {
-  if (!item.children || !item.children.length) {
-    if (typeof item.value === 'undefined') {
-      return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), "/>");
-    }
-
-    return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), ">").concat(item.value, "</c:").concat(item.type, ">");
-  }
-
-  var children = item.children.map(filter);
-  return "<c:".concat(item.type, " ").concat(formatAttrs(item.attrs), ">\n            ").concat(children, "\n          </c:").concat(item.type, ">");
-}
-
-function formatAttrs(attrs) {
-  if (_typeof(attrs) !== 'object') {
-    return '';
-  }
-
-  return Object.keys(attrs).map(function (attr) {
-    return "".concat(attr, "=\"").concat(attrs[attr], "\"");
-  }).join(' ');
-}
-
-},{}],26:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-Object.defineProperty(exports, "addressBookQuery", {
-  enumerable: true,
-  get: function get() {
-    return _address_book_query["default"];
-  }
-});
-Object.defineProperty(exports, "calendarQuery", {
-  enumerable: true,
-  get: function get() {
-    return _calendar_query["default"];
-  }
-});
-Object.defineProperty(exports, "propfind", {
-  enumerable: true,
-  get: function get() {
-    return _propfind["default"];
-  }
-});
-Object.defineProperty(exports, "syncCollection", {
-  enumerable: true,
-  get: function get() {
-    return _sync_collection["default"];
-  }
-});
-
-var _address_book_query = _interopRequireDefault(require("./address_book_query"));
-
-var _calendar_query = _interopRequireDefault(require("./calendar_query"));
-
-var _propfind = _interopRequireDefault(require("./propfind"));
-
-var _sync_collection = _interopRequireDefault(require("./sync_collection"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-},{"./address_book_query":23,"./calendar_query":24,"./propfind":28,"./sync_collection":29}],27:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = prop;
-
-var ns = _interopRequireWildcard(require("../namespace"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-/**
- * @param {Object} filter looks like
- *
- *     {
- *       type: 'comp-filter',
- *       attrs: {
- *         name: 'VCALENDAR'
- *       }
- *     }
- *
- * Or maybe
- *
- *     {
- *       type: 'time-range',
- *       attrs: {
- *         start: '20060104T000000Z',
- *         end: '20060105T000000Z'
- *       }
- *     }
- *
- * You can nest them like so:
- *
- *     {
- *       type: 'comp-filter',
- *       attrs: { name: 'VCALENDAR' },
- *       children: [{
- *         type: 'comp-filter',
- *         attrs: { name: 'VEVENT' },
- *         children: [{
- *           type: 'time-range',
- *           attrs: { start: '20060104T000000Z', end: '20060105T000000Z' }
- *         }]
- *       }]
- *     }
- */
-function prop(item) {
-  return "<".concat(xmlnsPrefix(item.namespace), ":").concat(item.name, " />");
-}
-
-function xmlnsPrefix(namespace) {
-  switch (namespace) {
-    case ns.DAV:
-      return 'd';
-
-    case ns.CALENDAR_SERVER:
-      return 'cs';
-
-    case ns.CALDAV_APPLE:
-      return 'ca';
-
-    case ns.CALDAV:
-      return 'c';
-
-    case ns.CARDDAV:
-      return 'card';
-
-    default:
-      throw new Error('Unrecognized xmlns ' + namespace);
-  }
-}
-
-},{"../namespace":19}],28:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = propfind;
-
-var _prop = _interopRequireDefault(require("./prop"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function propfind(object) {
-  return "<d:propfind xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n              xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n              xmlns:cs=\"http://calendarserver.org/ns/\"\n              xmlns:ca=\"http://apple.com/ns/ical/\"\n              xmlns:d=\"DAV:\">\n    <d:prop>\n      ".concat(object.props.map(_prop["default"]), "\n    </d:prop>\n  </d:propfind>");
-}
-
-},{"./prop":27}],29:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = syncCollection;
-
-var _prop = _interopRequireDefault(require("./prop"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function syncCollection(object) {
-  return "<d:sync-collection xmlns:c=\"urn:ietf:params:xml:ns:caldav\"\n                     xmlns:card=\"urn:ietf:params:xml:ns:carddav\"\n                     xmlns:d=\"DAV:\">\n    <d:sync-level>".concat(object.syncLevel, "</d:sync-level>\n    <d:sync-token>").concat(object.syncToken, "</d:sync-token>\n    <d:prop>\n      ").concat(object.props.map(_prop["default"]), "\n    </d:prop>\n  </d:sync-collection>");
-}
-
-},{"./prop":27}],30:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.OAuth2 = exports.Basic = exports.Transport = void 0;
-
-var _co = _interopRequireDefault(require("co"));
-
-var _querystring = _interopRequireDefault(require("querystring"));
-
-var _base64util = require("base64util");
-
-var _xmlhttprequest = _interopRequireDefault(require("./xmlhttprequest"));
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function"); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, writable: true, configurable: true } }); if (superClass) _setPrototypeOf(subClass, superClass); }
-
-function _setPrototypeOf(o, p) { _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) { o.__proto__ = p; return o; }; return _setPrototypeOf(o, p); }
-
-function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = _getPrototypeOf(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = _getPrototypeOf(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _possibleConstructorReturn(this, result); }; }
-
-function _possibleConstructorReturn(self, call) { if (call && (_typeof(call) === "object" || typeof call === "function")) { return call; } return _assertThisInitialized(self); }
-
-function _assertThisInitialized(self) { if (self === void 0) { throw new ReferenceError("this hasn't been initialised - super() hasn't been called"); } return self; }
-
-function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Reflect.construct) return false; if (Reflect.construct.sham) return false; if (typeof Proxy === "function") return true; try { Boolean.prototype.valueOf.call(Reflect.construct(Boolean, [], function () {})); return true; } catch (e) { return false; } }
-
-function _getPrototypeOf(o) { _getPrototypeOf = Object.setPrototypeOf ? Object.getPrototypeOf : function _getPrototypeOf(o) { return o.__proto__ || Object.getPrototypeOf(o); }; return _getPrototypeOf(o); }
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
-
-function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
-
-var Transport = /*#__PURE__*/function () {
-  /**
-   * @param {dav.Credentials} credentials user authorization.
-   */
-  function Transport(credentials) {
-    _classCallCheck(this, Transport);
-
-    this.credentials = credentials || null;
-  }
-  /**
-   * @param {dav.Request} request object with request info.
-   * @return {Promise} a promise that will be resolved with an xhr request after
-   *     its readyState is 4 or the result of applying an optional request
-   *     `transformResponse` function to the xhr object after its readyState is 4.
-   *
-   * Options:
-   *
-   *   (Object) sandbox - optional request sandbox.
-   */
-
-
-  _createClass(Transport, [{
-    key: "send",
-    value: function send() {}
-  }]);
-
-  return Transport;
-}();
-
-exports.Transport = Transport;
-
-var Basic = /*#__PURE__*/function (_Transport) {
-  _inherits(Basic, _Transport);
-
-  var _super = _createSuper(Basic);
-
-  /**
-   * @param {dav.Credentials} credentials user authorization.
-   */
-  function Basic(credentials) {
-    _classCallCheck(this, Basic);
-
-    return _super.call(this, credentials);
-  }
-
-  _createClass(Basic, [{
-    key: "send",
-    value: function send(request, url, options) {
-      return (0, _co["default"])( /*#__PURE__*/regeneratorRuntime.mark(function _callee() {
-        var sandbox, transformRequest, transformResponse, onerror, xhr, auth, result;
-        return regeneratorRuntime.wrap(function _callee$(_context) {
-          while (1) {
-            switch (_context.prev = _context.next) {
-              case 0:
-                sandbox = options && options.sandbox;
-                transformRequest = request.transformRequest;
-                transformResponse = request.transformResponse;
-                onerror = request.onerror;
-                xhr = new _xmlhttprequest["default"]();
-                if (sandbox) sandbox.add(xhr);
-                xhr.open(request.method, url, true
-                /* async */
-                );
-                auth = "Basic " + (0, _base64util.encode)(this.credentials.username + ":" + this.credentials.password);
-                xhr.setRequestHeader("Authorization", auth);
-                xhr.withCredentials = true;
-                if (transformRequest) transformRequest(xhr);
-                _context.prev = 11;
-                _context.next = 14;
-                return xhr.send(request.requestData);
-
-              case 14:
-                result = transformResponse ? transformResponse(xhr) : xhr;
-                _context.next = 21;
-                break;
-
-              case 17:
-                _context.prev = 17;
-                _context.t0 = _context["catch"](11);
-                if (onerror) onerror(_context.t0);
-                throw _context.t0;
-
-              case 21:
-                return _context.abrupt("return", result);
-
-              case 22:
-              case "end":
-                return _context.stop();
-            }
-          }
-        }, _callee, this, [[11, 17]]);
-      }).bind(this));
-    }
-  }]);
-
-  return Basic;
-}(Transport);
-/**
- * @param {dav.Credentials} credentials user authorization.
- */
-
-
-exports.Basic = Basic;
-
-var OAuth2 = /*#__PURE__*/function (_Transport2) {
-  _inherits(OAuth2, _Transport2);
-
-  var _super2 = _createSuper(OAuth2);
-
-  function OAuth2(credentials) {
-    _classCallCheck(this, OAuth2);
-
-    return _super2.call(this, credentials);
-  }
-
-  _createClass(OAuth2, [{
-    key: "send",
-    value: function send(request, url) {
-      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-      return (0, _co["default"])( /*#__PURE__*/regeneratorRuntime.mark(function _callee2() {
-        var sandbox, transformRequest, transformResponse, onerror, result, xhr, token;
-        return regeneratorRuntime.wrap(function _callee2$(_context2) {
-          while (1) {
-            switch (_context2.prev = _context2.next) {
-              case 0:
-                sandbox = options.sandbox;
-                transformRequest = request.transformRequest;
-                transformResponse = request.transformResponse;
-                onerror = request.onerror;
-                if (!('retry' in options)) options.retry = true;
-                _context2.prev = 5;
-                _context2.next = 8;
-                return access(this.credentials, options);
-
-              case 8:
-                token = _context2.sent;
-                xhr = new _xmlhttprequest["default"]();
-                if (sandbox) sandbox.add(xhr);
-                xhr.open(request.method, url, true
-                /* async */
-                );
-                xhr.setRequestHeader('Authorization', "Bearer ".concat(token));
-                if (transformRequest) transformRequest(xhr);
-                _context2.next = 16;
-                return xhr.send(request.requestData);
-
-              case 16:
-                result = transformResponse ? transformResponse(xhr) : xhr;
-                _context2.next = 27;
-                break;
-
-              case 19:
-                _context2.prev = 19;
-                _context2.t0 = _context2["catch"](5);
-
-                if (!(options.retry && xhr.status === 401)) {
-                  _context2.next = 25;
-                  break;
-                }
-
-                // Force expiration.
-                this.credentials.expiration = 0; // Retry once at most.
-
-                options.retry = false;
-                return _context2.abrupt("return", this.send(request, url, options));
-
-              case 25:
-                if (onerror) onerror(_context2.t0);
-                throw _context2.t0;
-
-              case 27:
-                return _context2.abrupt("return", result);
-
-              case 28:
-              case "end":
-                return _context2.stop();
-            }
-          }
-        }, _callee2, this, [[5, 19]]);
-      }).bind(this));
-    }
-  }]);
-
-  return OAuth2;
-}(Transport);
-/**
- * @return {Promise} promise that will resolve with access token.
- */
-
-
-exports.OAuth2 = OAuth2;
-
-function access(credentials, options) {
-  if (!credentials.accessToken) {
-    return getAccessToken(credentials, options);
-  }
-
-  if (credentials.refreshToken && isExpired(credentials)) {
-    return refreshAccessToken(credentials, options);
-  }
-
-  return Promise.resolve(credentials.accessToken);
-}
-
-function isExpired(credentials) {
-  return typeof credentials.expiration === 'number' && Date.now() > credentials.expiration;
-}
-
-var getAccessToken = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee3(credentials, options) {
-  var sandbox, xhr, data, now, response;
-  return regeneratorRuntime.wrap(function _callee3$(_context3) {
-    while (1) {
-      switch (_context3.prev = _context3.next) {
-        case 0:
-          sandbox = options.sandbox;
-          xhr = new _xmlhttprequest["default"]();
-          if (sandbox) sandbox.add(xhr);
-          xhr.open('POST', credentials.tokenUrl, true
-          /* async */
-          );
-          xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-          data = _querystring["default"].stringify({
-            code: credentials.authorizationCode,
-            redirect_uri: credentials.redirectUrl,
-            client_id: credentials.clientId,
-            client_secret: credentials.clientSecret,
-            grant_type: 'authorization_code'
-          });
-          now = Date.now();
-          _context3.next = 9;
-          return xhr.send(data);
-
-        case 9:
-          response = JSON.parse(xhr.responseText);
-          credentials.accessToken = response.access_token;
-          credentials.refreshToken = 'refresh_token' in response ? response.refresh_token : null;
-          credentials.expiration = 'expires_in' in response ? now + response.expires_in : null;
-          return _context3.abrupt("return", response.access_token);
-
-        case 14:
-        case "end":
-          return _context3.stop();
-      }
-    }
-  }, _callee3);
-}));
-
-var refreshAccessToken = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee4(credentials, options) {
-  var sandbox, xhr, data, now, response;
-  return regeneratorRuntime.wrap(function _callee4$(_context4) {
-    while (1) {
-      switch (_context4.prev = _context4.next) {
-        case 0:
-          sandbox = options.sandbox;
-          xhr = new _xmlhttprequest["default"]();
-          if (sandbox) sandbox.add(xhr);
-          xhr.open('POST', credentials.tokenUrl, true
-          /* async */
-          );
-          xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
-          data = _querystring["default"].stringify({
-            client_id: credentials.clientId,
-            client_secret: credentials.clientSecret,
-            refresh_token: credentials.refreshToken,
-            grant_type: 'refresh_token'
-          });
-          now = Date.now();
-          _context4.next = 9;
-          return xhr.send(data);
-
-        case 9:
-          response = JSON.parse(xhr.responseText);
-          credentials.accessToken = response.access_token;
-          credentials.expiration = 'expires_in' in response ? now + response.expires_in : null;
-          return _context4.abrupt("return", response.access_token);
-
-        case 13:
-        case "end":
-          return _context4.stop();
-      }
-    }
-  }, _callee4);
-}));
-
-},{"./xmlhttprequest":32,"base64util":33,"co":34,"querystring":8}],31:[function(require,module,exports){
-"use strict";
-
-function _typeof(obj) { "@babel/helpers - typeof"; if (typeof Symbol === "function" && typeof Symbol.iterator === "symbol") { _typeof = function _typeof(obj) { return typeof obj; }; } else { _typeof = function _typeof(obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; }; } return _typeof(obj); }
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports.createObject = createObject;
-exports.updateObject = updateObject;
-exports.deleteObject = deleteObject;
-exports.syncCollection = syncCollection;
-exports.isCollectionDirty = exports.supportedReportSet = void 0;
-
-var _co = _interopRequireDefault(require("co"));
-
-var _fuzzy_url_equals = _interopRequireDefault(require("./fuzzy_url_equals"));
-
-var ns = _interopRequireWildcard(require("./namespace"));
-
-var request = _interopRequireWildcard(require("./request"));
-
-function _getRequireWildcardCache(nodeInterop) { if (typeof WeakMap !== "function") return null; var cacheBabelInterop = new WeakMap(); var cacheNodeInterop = new WeakMap(); return (_getRequireWildcardCache = function _getRequireWildcardCache(nodeInterop) { return nodeInterop ? cacheNodeInterop : cacheBabelInterop; })(nodeInterop); }
-
-function _interopRequireWildcard(obj, nodeInterop) { if (!nodeInterop && obj && obj.__esModule) { return obj; } if (obj === null || _typeof(obj) !== "object" && typeof obj !== "function") { return { "default": obj }; } var cache = _getRequireWildcardCache(nodeInterop); if (cache && cache.has(obj)) { return cache.get(obj); } var newObj = {}; var hasPropertyDescriptor = Object.defineProperty && Object.getOwnPropertyDescriptor; for (var key in obj) { if (key !== "default" && Object.prototype.hasOwnProperty.call(obj, key)) { var desc = hasPropertyDescriptor ? Object.getOwnPropertyDescriptor(obj, key) : null; if (desc && (desc.get || desc.set)) { Object.defineProperty(newObj, key, desc); } else { newObj[key] = obj[key]; } } } newObj["default"] = obj; if (cache) { cache.set(obj, newObj); } return newObj; }
-
-function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { "default": obj }; }
-
-var debug = require('debug')('dav:webdav');
-/**
- * @param {String} objectUrl url for webdav object.
- * @param {String} objectData webdav object data.
- */
-
-
-function createObject(objectUrl, objectData, options) {
-  var req = request.basic({
-    method: 'PUT',
-    data: objectData,
-    contentType: options.contentType
-  });
-  return options.xhr.send(req, objectUrl, {
-    sandbox: options.sandbox
-  });
-}
-
-function updateObject(objectUrl, objectData, etag, options) {
-  var req = request.basic({
-    method: 'PUT',
-    data: objectData,
-    etag: etag,
-    contentType: options.contentType
-  });
-  return options.xhr.send(req, objectUrl, {
-    sandbox: options.sandbox
-  });
-}
-
-function deleteObject(objectUrl, etag, options) {
-  var req = request.basic({
-    method: 'DELETE',
-    etag: etag
-  });
-  return options.xhr.send(req, objectUrl, {
-    sandbox: options.sandbox
-  });
-}
-
-function syncCollection(collection, options) {
-  var syncMethod;
-
-  if ('syncMethod' in options) {
-    syncMethod = options.syncMethod;
-  } else if (collection.reports && collection.reports.indexOf('syncCollection') !== -1) {
-    syncMethod = 'webdav';
-  } else {
-    syncMethod = 'basic';
-  }
-
-  if (syncMethod === 'webdav') {
-    debug('rfc 6578 sync.');
-    return options.webdavSync(collection, options);
-  } else {
-    debug('basic sync.');
-    return options.basicSync(collection, options);
-  }
-}
-/**
- * @param {dav.DAVCollection} collection to fetch report set for.
- */
-
-
-var supportedReportSet = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee(collection, options) {
-  var req, response;
-  return regeneratorRuntime.wrap(function _callee$(_context) {
-    while (1) {
-      switch (_context.prev = _context.next) {
-        case 0:
-          debug('Checking supported report set for collection at ' + collection.url);
-          req = request.propfind({
-            props: [{
-              name: 'supported-report-set',
-              namespace: ns.DAV
-            }],
-            depth: 1,
-            mergeResponses: true
-          });
-          _context.next = 4;
-          return options.xhr.send(req, collection.url, {
-            sandbox: options.sandbox
-          });
-
-        case 4:
-          response = _context.sent;
-          return _context.abrupt("return", response.props.supportedReportSet);
-
-        case 6:
-        case "end":
-          return _context.stop();
-      }
-    }
-  }, _callee);
-}));
-
-exports.supportedReportSet = supportedReportSet;
-
-var isCollectionDirty = _co["default"].wrap( /*#__PURE__*/regeneratorRuntime.mark(function _callee2(collection, options) {
-  var req, responses, response;
-  return regeneratorRuntime.wrap(function _callee2$(_context2) {
-    while (1) {
-      switch (_context2.prev = _context2.next) {
-        case 0:
-          if (collection.ctag) {
-            _context2.next = 3;
-            break;
-          }
-
-          debug('Missing ctag.');
-          return _context2.abrupt("return", false);
-
-        case 3:
-          debug('Fetch remote getctag prop.');
-          req = request.propfind({
-            props: [{
-              name: 'getctag',
-              namespace: ns.CALENDAR_SERVER
-            }],
-            depth: 0
-          });
-          _context2.next = 7;
-          return options.xhr.send(req, collection.account.homeUrl, {
-            sandbox: options.sandbox
-          });
-
-        case 7:
-          responses = _context2.sent;
-          response = responses.filter(function (response) {
-            // Find the response that corresponds to the parameter collection.
-            return (0, _fuzzy_url_equals["default"])(collection.url, response.href);
-          })[0];
-
-          if (response) {
-            _context2.next = 11;
-            break;
-          }
-
-          throw new Error('Could not find collection on remote. Was it deleted?');
-
-        case 11:
-          debug('Check whether cached ctag matches remote.');
-          return _context2.abrupt("return", collection.ctag !== response.props.getctag);
-
-        case 13:
-        case "end":
-          return _context2.stop();
-      }
-    }
-  }, _callee2);
-}));
-
-exports.isCollectionDirty = isCollectionDirty;
-
-},{"./fuzzy_url_equals":16,"./namespace":19,"./request":21,"co":34,"debug":35}],32:[function(require,module,exports){
-"use strict";
-
-Object.defineProperty(exports, "__esModule", {
-  value: true
-});
-exports["default"] = void 0;
-
-function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
-
-function _defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } }
-
-function _createClass(Constructor, protoProps, staticProps) { if (protoProps) _defineProperties(Constructor.prototype, protoProps); if (staticProps) _defineProperties(Constructor, staticProps); return Constructor; }
-
-var debug = require('debug')('dav:xmlhttprequest');
-
-var Native;
-
-if (typeof self !== 'undefined' && 'XMLHttpRequest' in self) {
-  Native = self.XMLHttpRequest;
-} else {
-  // Trick browserify into not loading XMLHttpRequest polyfill
-  // since it is available in the platform (including web workers)
-  Native = require(false || 'xmlhttprequest').XMLHttpRequest;
-}
-/**
- * @fileoverview Promise wrapper around native xhr api.
- */
-
-
-var XMLHttpRequest = /*#__PURE__*/function () {
-  function XMLHttpRequest(options) {
-    var _this = this;
-
-    _classCallCheck(this, XMLHttpRequest);
-
-    this.request = new Native(options);
-    this.sandbox = null;
-    /* readwrite */
-
-    ['response', 'responseText', 'responseType', 'responseXML', 'timeout', 'upload', 'withCredentials'].forEach(function (attribute) {
-      Object.defineProperty(_this, attribute, {
-        get: function get() {
-          return this.request[attribute];
-        },
-        set: function set(value) {
-          this.request[attribute] = value;
-        }
-      });
-    });
-    /* readonly */
-
-    ['status', 'statusText'].forEach(function (attribute) {
-      Object.defineProperty(_this, attribute, {
-        get: function get() {
-          return this.request[attribute];
-        }
-      });
-    });
-  }
-
-  _createClass(XMLHttpRequest, [{
-    key: "abort",
-    value: function abort() {
-      return this._callNative('abort', arguments);
-    }
-  }, {
-    key: "getAllResponseHeaders",
-    value: function getAllResponseHeaders() {
-      return this._callNative('getAllResponseHeaders', arguments);
-    }
-  }, {
-    key: "getResponseHeader",
-    value: function getResponseHeader() {
-      return this._callNative('getResponseHeader', arguments);
-    }
-  }, {
-    key: "open",
-    value: function open() {
-      return this._callNative('open', arguments);
-    }
-  }, {
-    key: "overrideMimeType",
-    value: function overrideMimeType() {
-      return this._callNative('overrideMimeType', arguments);
-    }
-  }, {
-    key: "setRequestHeader",
-    value: function setRequestHeader() {
-      return this._callNative('setRequestHeader', arguments);
-    }
-  }, {
-    key: "send",
-    value: function send(data) {
-      debug("Sending request data: ".concat(data));
-      if (this.sandbox) this.sandbox.add(this);
-      var request = this.request;
-      request.send(data);
-      return new Promise(function (resolve, reject) {
-        request.onreadystatechange = function () {
-          if (request.readyState !== 4
-          /* done */
-          ) {
-              return;
-            }
-
-          if (request.status < 200 || request.status >= 400) {
-            return reject(new Error("Bad status: ".concat(request.status)));
-          }
-
-          return resolve(request.responseText);
-        };
-
-        request.ontimeout = function () {
-          reject(new Error("Request timed out after ".concat(request.timeout, " ms")));
-        };
-      });
-    }
-  }, {
-    key: "_callNative",
-    value: function _callNative(method, args) {
-      return this.request[method].apply(this.request, args);
-    }
-  }]);
-
-  return XMLHttpRequest;
-}();
-
-exports["default"] = XMLHttpRequest;
-
-},{"debug":35}],33:[function(require,module,exports){
-(function (Buffer){(function (){
-(function (global, factory) {
-    typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) :
-    typeof define === 'function' && define.amd ? define(['exports'], factory) :
-    (global = global || self, factory(global.base64 = {}));
-}(this, (function (exports) { 'use strict';
-
-    var b64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
-
-    /*globals atob, Buffer*/
-    // Modern browsers have atob and btoa defined
-
-    var atobBrowser = typeof atob == 'function' && atob; // Node.js
-
-    function atobNode(data) {
-      return Buffer.from(data, 'base64').toString('binary');
-    } // Out custom implementation (polyfill)
-
-    var b64i;
-    var wsReg = /[\t\n\r\x20\x0C]+/g;
-    var chr = String.fromCharCode; // if ( typeof chr.bind == 'function' ) chr = chr.bind(String);
-
-    /**
-     * Decodes UTF8 or byte string
-     *
-     * @param {String} data
-     */
-
-    function atobJS(data) {
-      if (!data) return data;
-      data = String(data).replace(wsReg, '');
-      var o1,
-          o2,
-          o3,
-          h1,
-          h2,
-          h3,
-          h4,
-          bits,
-          l = data.length,
-          i = 0,
-          ac = 0,
-          dec = '',
-          tmp_arr = [];
-
-      if (b64i == undefined) {
-        b64i = {};
-
-        for (var j = 0, bl = b64.length; j < bl; j++) {
-          b64i[b64.charAt(j)] = j;
-        }
-      }
-
-      do {
-        // unpack four hexets into three octets using index points in b64
-        h1 = b64i[data.charAt(i++)];
-        h2 = b64i[data.charAt(i++)];
-        h3 = b64i[data.charAt(i++)];
-        h4 = b64i[data.charAt(i++)];
-        bits = h1 << 18 | h2 << 12 | h3 << 6 | h4;
-        o1 = bits >> 16 & 0xff;
-        o2 = bits >> 8 & 0xff;
-        o3 = bits & 0xff;
-
-        if (h3 == 64) {
-          tmp_arr[ac++] = chr(o1);
-        } else if (h4 == 64) {
-          tmp_arr[ac++] = chr(o1, o2);
-        } else {
-          tmp_arr[ac++] = chr(o1, o2, o3);
-        }
-      } while (i < l);
-
-      dec = tmp_arr.join('');
-      return dec.replace(/\0+$/, '');
-    }
-
-    var _atob = atobBrowser || typeof Buffer == 'function' && atobNode || atobJS;
-
-    /*globals btoa, Buffer*/
-    // Modern browsers have atob and btoa defined
-
-    var btoaBrowser = typeof btoa == 'function' && btoa; // Node.js
-
-    function btoaNode(data) {
-      return Buffer.from(data, 'binary').toString('base64');
-    } // Out custom implementation (polyfill)
-
-    /**
-     * Encodes UTF8 or byte string
-     *
-     * @param {String} data
-     */
-
-    function btoaJS(data) {
-      if (!data) return data;
-      var o1,
-          o2,
-          o3,
-          h1,
-          h2,
-          h3,
-          h4,
-          bits,
-          i = 0,
-          ac = 0,
-          enc = '',
-          tmp_arr = [];
-
-      do {
-        // pack three octets into four hexets
-        o1 = data.charCodeAt(i++);
-        o2 = data.charCodeAt(i++);
-        o3 = data.charCodeAt(i++);
-        bits = o1 << 16 | o2 << 8 | o3;
-        h1 = bits >> 18 & 0x3f;
-        h2 = bits >> 12 & 0x3f;
-        h3 = bits >> 6 & 0x3f;
-        h4 = bits & 0x3f; // use hexets to index into b64, and append result to encoded string
-
-        tmp_arr[ac++] = b64.charAt(h1) + b64.charAt(h2) + b64.charAt(h3) + b64.charAt(h4);
-      } while (i < data.length);
-
-      enc = tmp_arr.join('');
-      var r = data.length % 3;
-      return (r ? enc.slice(0, r - 3) : enc) + '==='.slice(r || 3);
-    }
-
-    var _btoa = btoaBrowser || typeof Buffer == 'function' && btoaNode || btoaJS;
-
-    /*globals unescape, escape, decodeURIComponent, encodeURI*/
-    /// Encode multi-byte into UTF-8 string
-    function utf8Encode(str) {
-      return unescape(encodeURI(str));
-    } /// Decode UTF-8 string to multi-byte string
-
-    function utf8Decode(str) {
-      return decodeURIComponent(escape(str));
-    }
-
-    /**
-    *  Base64 string encoding and decoding utility.
-    *
-    *  play @ https://duzun.me/playground/encode#base64Encode=Test%20String%20
-    *
-    *  original of _btoa and _atob by: Tyler Akins (http://rumkin.com)
-    *
-    *
-    *  @license MIT
-    *  @version 2.1.0
-    *  @author Dumitru Uzun (DUzun.Me)
-    */
-    var VERSION = '2.1.0';
-
-    function byteDecode(data) {
-      var ret = data;
-
-      if (ret) {
-        ret = _atob(String(ret).replace(/_/g, '/').replace(/-/g, '+'));
-      }
-
-      return ret;
-    } // Encode byte-string - 8bit per char - used for binary data
-
-    function mbEncode(data) {
-      if (!data) return data;
-      return _btoa(utf8Encode(data));
-    } // Decodes to multi-byte string if utf8-encoded
-
-    function mbDecode(data, force_utf8) {
-      var ret = byteDecode(data);
-
-      if (ret) {
-        if (force_utf8) {
-          return utf8Decode(ret);
-        } else {
-          try {
-            ret = utf8Decode(ret);
-          } catch (err) {}
-        }
-      }
-
-      return ret;
-    } // Encode for URL
-
-    function byteUrlEncode(data) {
-      var ret = _btoa(data);
-
-      return ret && ret.replace(/\=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
-    } // Decode from byteUrlEncode()
-
-    function byteUrlDecode(data, force_utf8) {
-      var ret = data;
-
-      if (ret) {
-        ret += '==='.substr(0, 3 - (ret.length + 3) % 4);
-        ret = byteDecode(ret);
-      }
-
-      return ret;
-    } // Encode as base64 a multi-byte string as utf8 for URL
-
-    function mbUrlEncode(data) {
-      if (!data) return data;
-      var ret = utf8Encode(data);
-      return byteUrlEncode(ret);
-    } // Decode base64 of utf8 encoded text to multi-byte string
-
-    function mbUrlDecode(data) {
-      var ret = byteUrlDecode(data);
-      return ret && utf8Decode(ret);
-    } // multi-byte string - common JS String - used for text data - get encoded/decoded to/from utf8
-
-    function polyfill(global) {
-      if (!global) {
-        global = typeof window == 'undefined' ? typeof global == 'undefined' ? typeof self == 'undefined' ? this || new Function('return this')() : self : global : window;
-      }
-
-      if (global) {
-        if (typeof atob == 'undefined') {
-          global.atob = _atob;
-        }
-
-        if (typeof btoa == 'undefined') {
-          global.btoa = _btoa;
-        }
-      }
-    }
-    function bindProto(__) {
-      var __ex = typeof Object.defineProperty == 'function' ? function (name, func
-      /*, proto*/
-      ) {
-        Object.defineProperty(
-        /*proto||*/
-        __, name, {
-          value: func,
-          configurable: true,
-          enumerable: false,
-          writeable: true
-        });
-      } : function (name, func
-      /*, proto*/
-      ) {
-        // Take care with (for ... in) on strings!
-
-        /*proto||*/
-        __[name] = func;
-      };
-
-      __ex('base64ByteEncode', function () {
-        return _btoa(this);
-      });
-
-      __ex('base64ByteDecode', function () {
-        return byteDecode(this);
-      });
-
-      __ex('base64Encode', function () {
-        return mbEncode(this);
-      });
-
-      __ex('base64Decode', function () {
-        return mbDecode(this);
-      });
-
-      __ex('base64ByteUrlEncode', function () {
-        return byteUrlEncode(this);
-      });
-
-      __ex('base64ByteUrlDecode', function () {
-        return byteUrlDecode(this);
-      });
-
-      __ex('base64UrlEncode', function () {
-        return mbUrlEncode(this);
-      });
-
-      __ex('base64UrlDecode', function () {
-        return mbUrlDecode(this);
-      });
-    } // Add String.prototype methods:
-    // bindProto(String.prototype);
-
-    exports.VERSION = VERSION;
-    exports._atob = _atob;
-    exports._btoa = _btoa;
-    exports.bindProto = bindProto;
-    exports.byteDecode = byteDecode;
-    exports.byteEncode = _btoa;
-    exports.byteUrlDecode = byteUrlDecode;
-    exports.byteUrlEncode = byteUrlEncode;
-    exports.decode = mbDecode;
-    exports.encode = mbEncode;
-    exports.mb2utf8 = utf8Encode;
-    exports.mbDecode = mbDecode;
-    exports.mbEncode = mbEncode;
-    exports.mbUrlDecode = mbUrlDecode;
-    exports.mbUrlEncode = mbUrlEncode;
-    exports.polyfill = polyfill;
-    exports.urlDecode = mbUrlDecode;
-    exports.urlEncode = mbUrlEncode;
-    exports.utf82mb = utf8Decode;
-
-    Object.defineProperty(exports, '__esModule', { value: true });
-
-})));
-
-
-}).call(this)}).call(this,require("buffer").Buffer)
-},{"buffer":2}],34:[function(require,module,exports){
-
-/**
- * slice() reference.
- */
-
-var slice = Array.prototype.slice;
-
-/**
- * Expose `co`.
- */
-
-module.exports = co['default'] = co.co = co;
-
-/**
- * Wrap the given generator `fn` into a
- * function that returns a promise.
- * This is a separate function so that
- * every `co()` call doesn't create a new,
- * unnecessary closure.
- *
- * @param {GeneratorFunction} fn
- * @return {Function}
- * @api public
- */
-
-co.wrap = function (fn) {
-  createPromise.__generatorFunction__ = fn;
-  return createPromise;
-  function createPromise() {
-    return co.call(this, fn.apply(this, arguments));
-  }
-};
-
-/**
- * Execute the generator function or a generator
- * and return a promise.
- *
- * @param {Function} fn
- * @return {Promise}
- * @api public
- */
-
-function co(gen) {
-  var ctx = this;
-  var args = slice.call(arguments, 1)
-
-  // we wrap everything in a promise to avoid promise chaining,
-  // which leads to memory leak errors.
-  // see https://github.com/tj/co/issues/180
-  return new Promise(function(resolve, reject) {
-    if (typeof gen === 'function') gen = gen.apply(ctx, args);
-    if (!gen || typeof gen.next !== 'function') return resolve(gen);
-
-    onFulfilled();
-
-    /**
-     * @param {Mixed} res
-     * @return {Promise}
-     * @api private
-     */
-
-    function onFulfilled(res) {
-      var ret;
-      try {
-        ret = gen.next(res);
-      } catch (e) {
-        return reject(e);
-      }
-      next(ret);
-    }
-
-    /**
-     * @param {Error} err
-     * @return {Promise}
-     * @api private
-     */
-
-    function onRejected(err) {
-      var ret;
-      try {
-        ret = gen.throw(err);
-      } catch (e) {
-        return reject(e);
-      }
-      next(ret);
-    }
-
-    /**
-     * Get the next value in the generator,
-     * return a promise.
-     *
-     * @param {Object} ret
-     * @return {Promise}
-     * @api private
-     */
-
-    function next(ret) {
-      if (ret.done) return resolve(ret.value);
-      var value = toPromise.call(ctx, ret.value);
-      if (value && isPromise(value)) return value.then(onFulfilled, onRejected);
-      return onRejected(new TypeError('You may only yield a function, promise, generator, array, or object, '
-        + 'but the following object was passed: "' + String(ret.value) + '"'));
-    }
-  });
-}
-
-/**
- * Convert a `yield`ed value into a promise.
- *
- * @param {Mixed} obj
- * @return {Promise}
- * @api private
- */
-
-function toPromise(obj) {
-  if (!obj) return obj;
-  if (isPromise(obj)) return obj;
-  if (isGeneratorFunction(obj) || isGenerator(obj)) return co.call(this, obj);
-  if ('function' == typeof obj) return thunkToPromise.call(this, obj);
-  if (Array.isArray(obj)) return arrayToPromise.call(this, obj);
-  if (isObject(obj)) return objectToPromise.call(this, obj);
-  return obj;
-}
-
-/**
- * Convert a thunk to a promise.
- *
- * @param {Function}
- * @return {Promise}
- * @api private
- */
-
-function thunkToPromise(fn) {
-  var ctx = this;
-  return new Promise(function (resolve, reject) {
-    fn.call(ctx, function (err, res) {
-      if (err) return reject(err);
-      if (arguments.length > 2) res = slice.call(arguments, 1);
-      resolve(res);
-    });
-  });
-}
-
-/**
- * Convert an array of "yieldables" to a promise.
- * Uses `Promise.all()` internally.
- *
- * @param {Array} obj
- * @return {Promise}
- * @api private
- */
-
-function arrayToPromise(obj) {
-  return Promise.all(obj.map(toPromise, this));
-}
-
-/**
- * Convert an object of "yieldables" to a promise.
- * Uses `Promise.all()` internally.
- *
- * @param {Object} obj
- * @return {Promise}
- * @api private
- */
-
-function objectToPromise(obj){
-  var results = new obj.constructor();
-  var keys = Object.keys(obj);
-  var promises = [];
-  for (var i = 0; i < keys.length; i++) {
-    var key = keys[i];
-    var promise = toPromise.call(this, obj[key]);
-    if (promise && isPromise(promise)) defer(promise, key);
-    else results[key] = obj[key];
-  }
-  return Promise.all(promises).then(function () {
-    return results;
-  });
-
-  function defer(promise, key) {
-    // predefine the key in the result
-    results[key] = undefined;
-    promises.push(promise.then(function (res) {
-      results[key] = res;
-    }));
-  }
-}
-
-/**
- * Check if `obj` is a promise.
- *
- * @param {Object} obj
- * @return {Boolean}
- * @api private
- */
-
-function isPromise(obj) {
-  return 'function' == typeof obj.then;
-}
-
-/**
- * Check if `obj` is a generator.
- *
- * @param {Mixed} obj
- * @return {Boolean}
- * @api private
- */
-
-function isGenerator(obj) {
-  return 'function' == typeof obj.next && 'function' == typeof obj.throw;
-}
-
-/**
- * Check if `obj` is a generator function.
- *
- * @param {Mixed} obj
- * @return {Boolean}
- * @api private
- */
-function isGeneratorFunction(obj) {
-  var constructor = obj.constructor;
-  if (!constructor) return false;
-  if ('GeneratorFunction' === constructor.name || 'GeneratorFunction' === constructor.displayName) return true;
-  return isGenerator(constructor.prototype);
-}
-
-/**
- * Check for plain object.
- *
- * @param {Mixed} val
- * @return {Boolean}
- * @api private
- */
-
-function isObject(val) {
-  return Object == val.constructor;
-}
-
-},{}],35:[function(require,module,exports){
-(function (process){(function (){
-/* eslint-env browser */
-
-/**
- * This is the web browser implementation of `debug()`.
- */
-
-exports.formatArgs = formatArgs;
-exports.save = save;
-exports.load = load;
-exports.useColors = useColors;
-exports.storage = localstorage();
-exports.destroy = (() => {
-	let warned = false;
-
-	return () => {
-		if (!warned) {
-			warned = true;
-			console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
-		}
-	};
-})();
-
-/**
- * Colors.
- */
-
-exports.colors = [
-	'#0000CC',
-	'#0000FF',
-	'#0033CC',
-	'#0033FF',
-	'#0066CC',
-	'#0066FF',
-	'#0099CC',
-	'#0099FF',
-	'#00CC00',
-	'#00CC33',
-	'#00CC66',
-	'#00CC99',
-	'#00CCCC',
-	'#00CCFF',
-	'#3300CC',
-	'#3300FF',
-	'#3333CC',
-	'#3333FF',
-	'#3366CC',
-	'#3366FF',
-	'#3399CC',
-	'#3399FF',
-	'#33CC00',
-	'#33CC33',
-	'#33CC66',
-	'#33CC99',
-	'#33CCCC',
-	'#33CCFF',
-	'#6600CC',
-	'#6600FF',
-	'#6633CC',
-	'#6633FF',
-	'#66CC00',
-	'#66CC33',
-	'#9900CC',
-	'#9900FF',
-	'#9933CC',
-	'#9933FF',
-	'#99CC00',
-	'#99CC33',
-	'#CC0000',
-	'#CC0033',
-	'#CC0066',
-	'#CC0099',
-	'#CC00CC',
-	'#CC00FF',
-	'#CC3300',
-	'#CC3333',
-	'#CC3366',
-	'#CC3399',
-	'#CC33CC',
-	'#CC33FF',
-	'#CC6600',
-	'#CC6633',
-	'#CC9900',
-	'#CC9933',
-	'#CCCC00',
-	'#CCCC33',
-	'#FF0000',
-	'#FF0033',
-	'#FF0066',
-	'#FF0099',
-	'#FF00CC',
-	'#FF00FF',
-	'#FF3300',
-	'#FF3333',
-	'#FF3366',
-	'#FF3399',
-	'#FF33CC',
-	'#FF33FF',
-	'#FF6600',
-	'#FF6633',
-	'#FF9900',
-	'#FF9933',
-	'#FFCC00',
-	'#FFCC33'
-];
-
-/**
- * Currently only WebKit-based Web Inspectors, Firefox >= v31,
- * and the Firebug extension (any Firefox version) are known
- * to support "%c" CSS customizations.
- *
- * TODO: add a `localStorage` variable to explicitly enable/disable colors
- */
-
-// eslint-disable-next-line complexity
-function useColors() {
-	// NB: In an Electron preload script, document will be defined but not fully
-	// initialized. Since we know we're in Chrome, we'll just detect this case
-	// explicitly
-	if (typeof window !== 'undefined' && window.process && (window.process.type === 'renderer' || window.process.__nwjs)) {
-		return true;
-	}
-
-	// Internet Explorer and Edge do not support colors.
-	if (typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/(edge|trident)\/(\d+)/)) {
-		return false;
-	}
-
-	// Is webkit? http://stackoverflow.com/a/16459606/376773
-	// document is undefined in react-native: https://github.com/facebook/react-native/pull/1632
-	return (typeof document !== 'undefined' && document.documentElement && document.documentElement.style && document.documentElement.style.WebkitAppearance) ||
-		// Is firebug? http://stackoverflow.com/a/398120/376773
-		(typeof window !== 'undefined' && window.console && (window.console.firebug || (window.console.exception && window.console.table))) ||
-		// Is firefox >= v31?
-		// https://developer.mozilla.org/en-US/docs/Tools/Web_Console#Styling_messages
-		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/firefox\/(\d+)/) && parseInt(RegExp.$1, 10) >= 31) ||
-		// Double check webkit in userAgent just in case we are in a worker
-		(typeof navigator !== 'undefined' && navigator.userAgent && navigator.userAgent.toLowerCase().match(/applewebkit\/(\d+)/));
-}
-
-/**
- * Colorize log arguments if enabled.
- *
- * @api public
- */
-
-function formatArgs(args) {
-	args[0] = (this.useColors ? '%c' : '') +
-		this.namespace +
-		(this.useColors ? ' %c' : ' ') +
-		args[0] +
-		(this.useColors ? '%c ' : ' ') +
-		'+' + module.exports.humanize(this.diff);
-
-	if (!this.useColors) {
-		return;
-	}
-
-	const c = 'color: ' + this.color;
-	args.splice(1, 0, c, 'color: inherit');
-
-	// The final "%c" is somewhat tricky, because there could be other
-	// arguments passed either before or after the %c, so we need to
-	// figure out the correct index to insert the CSS into
-	let index = 0;
-	let lastC = 0;
-	args[0].replace(/%[a-zA-Z%]/g, match => {
-		if (match === '%%') {
-			return;
-		}
-		index++;
-		if (match === '%c') {
-			// We only are interested in the *last* %c
-			// (the user may have provided their own)
-			lastC = index;
-		}
-	});
-
-	args.splice(lastC, 0, c);
-}
-
-/**
- * Invokes `console.debug()` when available.
- * No-op when `console.debug` is not a "function".
- * If `console.debug` is not available, falls back
- * to `console.log`.
- *
- * @api public
- */
-exports.log = console.debug || console.log || (() => {});
-
-/**
- * Save `namespaces`.
- *
- * @param {String} namespaces
- * @api private
- */
-function save(namespaces) {
-	try {
-		if (namespaces) {
-			exports.storage.setItem('debug', namespaces);
-		} else {
-			exports.storage.removeItem('debug');
-		}
-	} catch (error) {
-		// Swallow
-		// XXX (@Qix-) should we be logging these?
-	}
-}
-
-/**
- * Load `namespaces`.
- *
- * @return {String} returns the previously persisted debug modes
- * @api private
- */
-function load() {
-	let r;
-	try {
-		r = exports.storage.getItem('debug');
-	} catch (error) {
-		// Swallow
-		// XXX (@Qix-) should we be logging these?
-	}
-
-	// If debug isn't set in LS, and we're in Electron, try to load $DEBUG
-	if (!r && typeof process !== 'undefined' && 'env' in process) {
-		r = process.env.DEBUG;
-	}
-
-	return r;
-}
-
-/**
- * Localstorage attempts to return the localstorage.
- *
- * This is necessary because safari throws
- * when a user disables cookies/localstorage
- * and you attempt to access it.
- *
- * @return {LocalStorage}
- * @api private
- */
-
-function localstorage() {
-	try {
-		// TVMLKit (Apple TV JS Runtime) does not have a window object, just localStorage in the global context
-		// The Browser also has localStorage in the global context.
-		return localStorage;
-	} catch (error) {
-		// Swallow
-		// XXX (@Qix-) should we be logging these?
-	}
-}
-
-module.exports = require('./common')(exports);
-
-const {formatters} = module.exports;
-
-/**
- * Map %j to `JSON.stringify()`, since no Web Inspectors do that by default.
- */
-
-formatters.j = function (v) {
-	try {
-		return JSON.stringify(v);
-	} catch (error) {
-		return '[UnexpectedJSONParseError]: ' + error.message;
-	}
-};
-
-}).call(this)}).call(this,require('_process'))
-},{"./common":36,"_process":4}],36:[function(require,module,exports){
-
-/**
- * This is the common logic for both the Node.js and web browser
- * implementations of `debug()`.
- */
-
-function setup(env) {
-	createDebug.debug = createDebug;
-	createDebug.default = createDebug;
-	createDebug.coerce = coerce;
-	createDebug.disable = disable;
-	createDebug.enable = enable;
-	createDebug.enabled = enabled;
-	createDebug.humanize = require('ms');
-	createDebug.destroy = destroy;
-
-	Object.keys(env).forEach(key => {
-		createDebug[key] = env[key];
-	});
-
-	/**
-	* The currently active debug mode names, and names to skip.
-	*/
-
-	createDebug.names = [];
-	createDebug.skips = [];
-
-	/**
-	* Map of special "%n" handling functions, for the debug "format" argument.
-	*
-	* Valid key names are a single, lower or upper-case letter, i.e. "n" and "N".
-	*/
-	createDebug.formatters = {};
-
-	/**
-	* Selects a color for a debug namespace
-	* @param {String} namespace The namespace string for the for the debug instance to be colored
-	* @return {Number|String} An ANSI color code for the given namespace
-	* @api private
-	*/
-	function selectColor(namespace) {
-		let hash = 0;
-
-		for (let i = 0; i < namespace.length; i++) {
-			hash = ((hash << 5) - hash) + namespace.charCodeAt(i);
-			hash |= 0; // Convert to 32bit integer
-		}
-
-		return createDebug.colors[Math.abs(hash) % createDebug.colors.length];
-	}
-	createDebug.selectColor = selectColor;
-
-	/**
-	* Create a debugger with the given `namespace`.
-	*
-	* @param {String} namespace
-	* @return {Function}
-	* @api public
-	*/
-	function createDebug(namespace) {
-		let prevTime;
-		let enableOverride = null;
-
-		function debug(...args) {
-			// Disabled?
-			if (!debug.enabled) {
-				return;
-			}
-
-			const self = debug;
-
-			// Set `diff` timestamp
-			const curr = Number(new Date());
-			const ms = curr - (prevTime || curr);
-			self.diff = ms;
-			self.prev = prevTime;
-			self.curr = curr;
-			prevTime = curr;
-
-			args[0] = createDebug.coerce(args[0]);
-
-			if (typeof args[0] !== 'string') {
-				// Anything else let's inspect with %O
-				args.unshift('%O');
-			}
-
-			// Apply any `formatters` transformations
-			let index = 0;
-			args[0] = args[0].replace(/%([a-zA-Z%])/g, (match, format) => {
-				// If we encounter an escaped % then don't increase the array index
-				if (match === '%%') {
-					return '%';
-				}
-				index++;
-				const formatter = createDebug.formatters[format];
-				if (typeof formatter === 'function') {
-					const val = args[index];
-					match = formatter.call(self, val);
-
-					// Now we need to remove `args[index]` since it's inlined in the `format`
-					args.splice(index, 1);
-					index--;
-				}
-				return match;
-			});
-
-			// Apply env-specific formatting (colors, etc.)
-			createDebug.formatArgs.call(self, args);
-
-			const logFn = self.log || createDebug.log;
-			logFn.apply(self, args);
-		}
-
-		debug.namespace = namespace;
-		debug.useColors = createDebug.useColors();
-		debug.color = createDebug.selectColor(namespace);
-		debug.extend = extend;
-		debug.destroy = createDebug.destroy; // XXX Temporary. Will be removed in the next major release.
-
-		Object.defineProperty(debug, 'enabled', {
-			enumerable: true,
-			configurable: false,
-			get: () => enableOverride === null ? createDebug.enabled(namespace) : enableOverride,
-			set: v => {
-				enableOverride = v;
-			}
-		});
-
-		// Env-specific initialization logic for debug instances
-		if (typeof createDebug.init === 'function') {
-			createDebug.init(debug);
-		}
-
-		return debug;
-	}
-
-	function extend(namespace, delimiter) {
-		const newDebug = createDebug(this.namespace + (typeof delimiter === 'undefined' ? ':' : delimiter) + namespace);
-		newDebug.log = this.log;
-		return newDebug;
-	}
-
-	/**
-	* Enables a debug mode by namespaces. This can include modes
-	* separated by a colon and wildcards.
-	*
-	* @param {String} namespaces
-	* @api public
-	*/
-	function enable(namespaces) {
-		createDebug.save(namespaces);
-
-		createDebug.names = [];
-		createDebug.skips = [];
-
-		let i;
-		const split = (typeof namespaces === 'string' ? namespaces : '').split(/[\s,]+/);
-		const len = split.length;
-
-		for (i = 0; i < len; i++) {
-			if (!split[i]) {
-				// ignore empty strings
-				continue;
-			}
-
-			namespaces = split[i].replace(/\*/g, '.*?');
-
-			if (namespaces[0] === '-') {
-				createDebug.skips.push(new RegExp('^' + namespaces.substr(1) + '$'));
-			} else {
-				createDebug.names.push(new RegExp('^' + namespaces + '$'));
-			}
-		}
-	}
-
-	/**
-	* Disable debug output.
-	*
-	* @return {String} namespaces
-	* @api public
-	*/
-	function disable() {
-		const namespaces = [
-			...createDebug.names.map(toNamespace),
-			...createDebug.skips.map(toNamespace).map(namespace => '-' + namespace)
-		].join(',');
-		createDebug.enable('');
-		return namespaces;
-	}
-
-	/**
-	* Returns true if the given mode name is enabled, false otherwise.
-	*
-	* @param {String} name
-	* @return {Boolean}
-	* @api public
-	*/
-	function enabled(name) {
-		if (name[name.length - 1] === '*') {
-			return true;
-		}
-
-		let i;
-		let len;
-
-		for (i = 0, len = createDebug.skips.length; i < len; i++) {
-			if (createDebug.skips[i].test(name)) {
-				return false;
-			}
-		}
-
-		for (i = 0, len = createDebug.names.length; i < len; i++) {
-			if (createDebug.names[i].test(name)) {
-				return true;
-			}
-		}
-
-		return false;
-	}
-
-	/**
-	* Convert regexp to namespace
-	*
-	* @param {RegExp} regxep
-	* @return {String} namespace
-	* @api private
-	*/
-	function toNamespace(regexp) {
-		return regexp.toString()
-			.substring(2, regexp.toString().length - 2)
-			.replace(/\.\*\?$/, '*');
-	}
-
-	/**
-	* Coerce `val`.
-	*
-	* @param {Mixed} val
-	* @return {Mixed}
-	* @api private
-	*/
-	function coerce(val) {
-		if (val instanceof Error) {
-			return val.stack || val.message;
-		}
-		return val;
-	}
-
-	/**
-	* XXX DO NOT USE. This is a temporary stub function.
-	* XXX It WILL be removed in the next major release.
-	*/
-	function destroy() {
-		console.warn('Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`.');
-	}
-
-	createDebug.enable(createDebug.load());
-
-	return createDebug;
-}
-
-module.exports = setup;
-
-},{"ms":37}],37:[function(require,module,exports){
-/**
- * Helpers.
- */
-
-var s = 1000;
-var m = s * 60;
-var h = m * 60;
-var d = h * 24;
-var w = d * 7;
-var y = d * 365.25;
-
-/**
- * Parse or format the given `val`.
- *
- * Options:
- *
- *  - `long` verbose formatting [false]
- *
- * @param {String|Number} val
- * @param {Object} [options]
- * @throws {Error} throw an error if val is not a non-empty string or a number
- * @return {String|Number}
- * @api public
- */
-
-module.exports = function(val, options) {
-  options = options || {};
-  var type = typeof val;
-  if (type === 'string' && val.length > 0) {
-    return parse(val);
-  } else if (type === 'number' && isFinite(val)) {
-    return options.long ? fmtLong(val) : fmtShort(val);
-  }
-  throw new Error(
-    'val is not a non-empty string or a valid number. val=' +
-      JSON.stringify(val)
-  );
-};
-
-/**
- * Parse the given `str` and return milliseconds.
- *
- * @param {String} str
- * @return {Number}
- * @api private
- */
-
-function parse(str) {
-  str = String(str);
-  if (str.length > 100) {
-    return;
-  }
-  var match = /^(-?(?:\d+)?\.?\d+) *(milliseconds?|msecs?|ms|seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d|weeks?|w|years?|yrs?|y)?$/i.exec(
-    str
-  );
-  if (!match) {
-    return;
-  }
-  var n = parseFloat(match[1]);
-  var type = (match[2] || 'ms').toLowerCase();
-  switch (type) {
-    case 'years':
-    case 'year':
-    case 'yrs':
-    case 'yr':
-    case 'y':
-      return n * y;
-    case 'weeks':
-    case 'week':
-    case 'w':
-      return n * w;
-    case 'days':
-    case 'day':
-    case 'd':
-      return n * d;
-    case 'hours':
-    case 'hour':
-    case 'hrs':
-    case 'hr':
-    case 'h':
-      return n * h;
-    case 'minutes':
-    case 'minute':
-    case 'mins':
-    case 'min':
-    case 'm':
-      return n * m;
-    case 'seconds':
-    case 'second':
-    case 'secs':
-    case 'sec':
-    case 's':
-      return n * s;
-    case 'milliseconds':
-    case 'millisecond':
-    case 'msecs':
-    case 'msec':
-    case 'ms':
-      return n;
-    default:
-      return undefined;
-  }
-}
-
-/**
- * Short format for `ms`.
- *
- * @param {Number} ms
- * @return {String}
- * @api private
- */
-
-function fmtShort(ms) {
-  var msAbs = Math.abs(ms);
-  if (msAbs >= d) {
-    return Math.round(ms / d) + 'd';
-  }
-  if (msAbs >= h) {
-    return Math.round(ms / h) + 'h';
-  }
-  if (msAbs >= m) {
-    return Math.round(ms / m) + 'm';
-  }
-  if (msAbs >= s) {
-    return Math.round(ms / s) + 's';
-  }
-  return ms + 'ms';
-}
-
-/**
- * Long format for `ms`.
- *
- * @param {Number} ms
- * @return {String}
- * @api private
- */
-
-function fmtLong(ms) {
-  var msAbs = Math.abs(ms);
-  if (msAbs >= d) {
-    return plural(ms, msAbs, d, 'day');
-  }
-  if (msAbs >= h) {
-    return plural(ms, msAbs, h, 'hour');
-  }
-  if (msAbs >= m) {
-    return plural(ms, msAbs, m, 'minute');
-  }
-  if (msAbs >= s) {
-    return plural(ms, msAbs, s, 'second');
-  }
-  return ms + ' ms';
-}
-
-/**
- * Pluralization helper.
- */
-
-function plural(ms, msAbs, n, name) {
-  var isPlural = msAbs >= n * 1.5;
-  return Math.round(ms / n) + ' ' + name + (isPlural ? 's' : '');
-}
 
 },{}],38:[function(require,module,exports){
 function DOMParser(options){
@@ -11032,7 +11038,7 @@ exports.ParseError = ParseError;
 },{}],42:[function(require,module,exports){
 module.exports={
   "name": "dav-fork",
-  "version": "1.8.3",
+  "version": "1.8.7",
   "author": "Gareth Aye [:gaye] <gaye@mozilla.com>",
   "description": "WebDAV, CalDAV, and CardDAV client for nodejs and the browser",
   "license": "MPL-2.0",
@@ -11071,15 +11077,17 @@ module.exports={
     "browserify": "^16.2.3",
     "chai": "^4.2.0",
     "doctoc": "^0.15.0",
+    "globcat": "^1.3.4",
     "mocha": "^5.2.0",
     "nock": "^10.0.6",
     "sinon": "^7.1.1",
     "tcp-port-used": "^1.0.1"
   },
   "scripts": {
+    "build": "browserify --standalone dav ./lib/index.js -t [ babelify --presets [ @babel/preset-env ] ] --outfile ./tmp/dav.js && globcat ./lib/polyfill/*.js ./tmp/dav.js --output ./dav.js",
     "test": "make test"
   }
 }
 
-},{}]},{},[17])(17)
+},{}]},{},[7])(7)
 });
